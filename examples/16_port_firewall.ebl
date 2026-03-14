@@ -1,0 +1,44 @@
+# Port Firewall: Nur Pakete an erlaubte Ports durchlassen, Rest droppen.
+#
+# Reales Szenario: Server soll nur SSH (22), HTTP (80), HTTPS (443) annehmen.
+# Alles andere wird am XDP-Layer gedroppt — bevor es den Kernel-Stack erreicht.
+#
+# Nicht-IPv4 und fragmentierte Pakete werden durchgelassen (safe default).
+
+xdp port_firewall do
+  map :allowed_ports, hash, key: u32, value: u64, max_entries: 1024
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) + TCP/UDP Dst-Port(4) = 38
+    if data + 38 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    let protocol = read_u8(data, 23)
+
+    # Nur TCP (6) und UDP (17) filtern — alles andere durchlassen
+    if protocol != 6 && protocol != 17 do
+      return :pass
+    end
+
+    # Destination Port: ETH(14) + IP(20) + 2 = Offset 36
+    # (TCP und UDP haben den Dest-Port an derselben Stelle)
+    let dst_port = read_u16_be(data, 36)
+
+    # Ist der Port in der Whitelist?
+    let allowed = map_lookup(allowed_ports, dst_port)
+    if allowed != 0 do
+      return :pass
+    end
+
+    return :drop
+  end
+end

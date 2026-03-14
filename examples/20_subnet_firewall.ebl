@@ -1,0 +1,46 @@
+# Subnet Firewall: CIDR-basiertes Blocking mit Bitmasken.
+#
+# Reales Szenario: Bestimmte Subnetze sollen komplett geblockt werden
+# (z.B. bekannte Botnet-Ranges, TOR Exit Nodes, Geo-Blocking).
+#
+# Funktionsweise:
+#   1. Source-IP extrahieren
+#   2. /24 Maske anwenden (oberste 24 Bit)
+#   3. Maskierte IP in Blocklist-Map nachschlagen
+#   4. Treffer → DROP
+#
+# Die Map enthaelt maskierte IPs als Keys.
+# z.B. 10.0.1.0 → blockiert alles aus 10.0.1.0/24
+
+xdp subnet_firewall do
+  map :blocked_subnets, hash, key: u32, value: u64, max_entries: 4096
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) = 34
+    if data + 34 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Source-IP: Offset 26 = ETH(14) + IP-Src(12)
+    let src_ip = read_u32_be(data, 26)
+
+    # /24 Maske: oberste 24 Bit behalten
+    let subnet = src_ip & 0xFFFFFF00
+
+    # Nachschlagen in der Blocklist
+    let blocked = map_lookup(blocked_subnets, subnet)
+    if blocked != 0 do
+      return :drop
+    end
+
+    return :pass
+  end
+end

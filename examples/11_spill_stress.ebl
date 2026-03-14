@@ -1,0 +1,29 @@
+# Register-Spill Stresstest: 15 gleichzeitige Variablen.
+#
+# BPF hat nur 11 Register (R0-R10), davon 7 fuer Variablen nutzbar.
+# Bei mehr als 7 Variablen muss der Register Allocator auf den
+# Stack spillen. Dieses Beispiel erzwingt massives Spilling.
+#
+# Demonstriert: Register Allocator, Spill/Reload, Stack-Nutzung.
+# Ergebnis: 120 (1+2+3+...+15)
+
+xdp spill_stress do
+  fn main(ctx) -> u64 do
+    let a = 1
+    let b = 2
+    let c = 3
+    let d = 4
+    let e = 5
+    let f = 6
+    let g = 7
+    let h = 8
+    let i = 9
+    let j = 10
+    let k = 11
+    let l = 12
+    let m = 13
+    let n = 14
+    let o = 15
+    return a + b + c + d + e + f + g + h + i + j + k + l + m + n + o
+  end
+end

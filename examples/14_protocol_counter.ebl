@@ -1,0 +1,40 @@
+# Protocol Counter: Pakete nach IP-Protokoll zaehlen.
+#
+# Demonstriert: Packet Parsing + Map Update mit protokollbasiertem Key.
+# Zaehlt TCP (6), UDP (17), ICMP (1) etc. separat.
+#
+# In der VM testen:
+#   {ok, Bin} = ebl_compile:file("examples/14_protocol_counter.ebl").
+#   Pkt = ebpf_test_pkt:tcp(#{src_ip => {10,0,0,1}, dst_ip => {10,0,0,2}}).
+#   Ctx = ebpf_test_pkt:xdp_ctx(Pkt).
+#   Opts = #{maps => [{hash, 4, 8, 256}]}.
+#   {ok, Result} = ebpf_vm:run(Bin, Ctx, Opts).
+
+xdp protocol_counter do
+  map :counters, hash, key: u32, value: u64, max_entries: 256
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds-Check: Ethernet (14) + IPv4 (20) = 34 Bytes
+    if data + 34 > data_end do
+      return :pass
+    end
+
+    # Nur IPv4 zaehlen
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 2048 do
+      return :pass
+    end
+
+    # IP-Protokoll: Offset 23 (Ethernet 14 + IP-Protokoll-Feld 9)
+    let protocol = read_u8(data, 23)
+
+    # Zaehler inkrementieren
+    let count = map_lookup(counters, protocol)
+    map_update(counters, protocol, count + 1)
+
+    return :pass
+  end
+end

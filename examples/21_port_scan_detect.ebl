@@ -1,0 +1,57 @@
+# Port Scan Erkennung: Zaehlt TCP RST-Antworten pro Source-IP.
+#
+# Reales Szenario: Ein Port Scanner (nmap, masscan) sendet SYN-Pakete an
+# viele Ports. Geschlossene Ports antworten mit RST. Ein Host der viele
+# verschiedene RSTs generiert, wird wahrscheinlich gescannt.
+#
+# Dieses Programm zaehlt RST-Pakete (outgoing) pro Destination-IP.
+# Wenn ein Host zu viele RSTs an dieselbe IP sendet → Block.
+#
+# TCP Flags: Offset 47 = ETH(14) + IP(20) + TCP-Flags(13)
+# RST = Bit 2 (0x04)
+
+xdp port_scan_detect do
+  map :rst_count, hash, key: u32, value: u64, max_entries: 16384
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) + TCP(20) = 54
+    if data + 54 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Nur TCP
+    let protocol = read_u8(data, 23)
+    if protocol != 6 do
+      return :pass
+    end
+
+    # TCP Flags pruefen: RST-Bit (0x04)
+    let flags = read_u8(data, 47)
+    if (flags & 0x04) == 0 do
+      return :pass
+    end
+
+    # Destination-IP: Der Host der die RSTs empfaengt = der Scanner
+    let dst_ip = read_u32_be(data, 30)
+
+    let count = map_lookup(rst_count, dst_ip)
+    let new_count = count + 1
+
+    # Mehr als 30 RSTs an dieselbe IP → Scanner erkannt, blockieren
+    if new_count > 30 do
+      map_update(rst_count, dst_ip, new_count)
+      return :drop
+    end
+
+    map_update(rst_count, dst_ip, new_count)
+    return :pass
+  end
+end

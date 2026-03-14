@@ -1,0 +1,65 @@
+# DNS Amplification Schutz: Erkennt grosse DNS-Antworten.
+#
+# Reales Szenario: Angreifer senden kleine DNS-Queries an offene Resolver
+# mit gefaelschter Absender-IP. Die Antworten (oft 10-50x groesser) werden
+# an das Opfer gesendet (Amplification Attack).
+#
+# Dieses Programm erkennt grosse UDP-Pakete auf Port 53 (DNS-Antworten)
+# und rate-limitet pro Ziel-IP.
+#
+# DNS-Header: Offset 42 = ETH(14) + IP(20) + UDP(8)
+# QR-Bit: Bit 7 von Byte 44 (erstes Byte der DNS-Flags)
+# QR=1 → Antwort, QR=0 → Query
+
+xdp dns_amplification do
+  map :dns_resp_count, hash, key: u32, value: u64, max_entries: 32768
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) + UDP(8) + DNS-Header(12) = 54
+    if data + 54 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Nur UDP (Protokoll 17)
+    let protocol = read_u8(data, 23)
+    if protocol != 17 do
+      return :pass
+    end
+
+    # Source Port 53 = DNS-Antwort vom Server
+    let src_port = read_u16_be(data, 34)
+    if src_port != 53 do
+      return :pass
+    end
+
+    # IP Total Length: Offset 16 = ETH(14) + IP-TotalLen(2)
+    # Grosse Pakete (> 512 Bytes IP-Laenge) sind verdaechtig
+    let ip_len = read_u16_be(data, 16)
+    if ip_len <= 512 do
+      return :pass
+    end
+
+    # Destination-IP = Opfer der Amplification
+    let dst_ip = read_u32_be(data, 30)
+
+    let count = map_lookup(dns_resp_count, dst_ip)
+    let new_count = count + 1
+
+    # Mehr als 20 grosse DNS-Antworten an dieselbe IP → Drop
+    if new_count > 20 do
+      map_update(dns_resp_count, dst_ip, new_count)
+      return :drop
+    end
+
+    map_update(dns_resp_count, dst_ip, new_count)
+    return :pass
+  end
+end

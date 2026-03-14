@@ -1,0 +1,27 @@
+# XDP Context-Zugriff: Felder des xdp_md Structs lesen.
+#
+# Demonstriert: ctx.data, ctx.data_end, ctx.ingress_ifindex,
+#               ctx-Felder in Ausdruecken und Vergleichen.
+#
+# In der VM testen:
+#   CtxBin = <<100:32/little, 200:32/little, 0:32, 1:32/little, 0:32, 0:32>>.
+#   {ok, Bin} = ebl_compile:file("examples/07_context_access.ebl").
+#   {ok, Result} = ebpf_vm:run(Bin, #{ctx => CtxBin}).
+#   Result.  % 100 (data_end - data)
+
+xdp context_demo do
+  fn main(ctx) -> u64 do
+    let d = ctx.data
+    let e = ctx.data_end
+
+    # Paketlaenge berechnen
+    let pkt_len = e - d
+
+    # Interface-basierte Entscheidung
+    if ctx.ingress_ifindex == 1 do
+      return pkt_len
+    else
+      return 0
+    end
+  end
+end

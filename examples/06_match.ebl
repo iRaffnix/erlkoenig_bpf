@@ -1,0 +1,17 @@
+# Pattern Matching mit match-Ausdruck.
+#
+# Demonstriert: match, literal Patterns, Wildcard (_).
+# Ergebnis: 20
+
+xdp pattern_match do
+  fn main(ctx) -> u64 do
+    let x = 2
+
+    match x do
+      1 -> return 10
+      2 -> return 20
+      3 -> return 30
+      _ -> return 99
+    end
+  end
+end

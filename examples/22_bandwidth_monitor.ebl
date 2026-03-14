@@ -1,0 +1,43 @@
+# Bandwidth Monitor: Zaehlt Bytes pro Source-IP.
+#
+# Reales Szenario: Traffic Accounting / Monitoring.
+# Zaehlt die gesamte Paketgroesse (IP Total Length) pro Absender.
+# Rein passiv — laesst ALLE Pakete durch (XDP_PASS).
+#
+# Erlaubt dem Userspace-Programm spaeter die Map auszulesen
+# und Top-Talker zu identifizieren.
+#
+# IP Total Length: Offset 16 = ETH(14) + IP-TotalLen(2)
+
+xdp bandwidth_monitor do
+  map :bytes_per_ip, hash, key: u32, value: u64, max_entries: 65536
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) = 34
+    if data + 34 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Source-IP
+    let src_ip = read_u32_be(data, 26)
+
+    # IP Total Length (inkl. Header)
+    let ip_len = read_u16_be(data, 16)
+
+    # Bisherigen Zaehler holen und Paketgroesse addieren
+    let current = map_lookup(bytes_per_ip, src_ip)
+    let new_total = current + ip_len
+    map_update(bytes_per_ip, src_ip, new_total)
+
+    # Immer durchlassen — reines Monitoring
+    return :pass
+  end
+end

@@ -1,0 +1,55 @@
+# ICMP Rate Limiter: Begrenzt Ping-Pakete pro Source-IP.
+#
+# Reales Szenario: Ping-Flood (ICMP Echo Request Amplification).
+# Erlaubt maximal 10 ICMP-Pakete pro Source-IP, danach DROP.
+#
+# ICMP Type 8 = Echo Request (Ping)
+# ICMP Type 0 = Echo Reply → wird durchgelassen
+# Andere ICMP-Typen → werden durchgelassen
+
+xdp icmp_rate_limiter do
+  map :ping_count, hash, key: u32, value: u64, max_entries: 32768
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) + ICMP-Header(8) = 42
+    if data + 42 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # ICMP = Protokoll 1
+    let protocol = read_u8(data, 23)
+    if protocol != 1 do
+      return :pass
+    end
+
+    # ICMP Type: Offset 34 = Ethernet(14) + IP(20) + ICMP-Type(0)
+    let icmp_type = read_u8(data, 34)
+
+    # Nur Echo Requests (Type 8) rate-limiten
+    if icmp_type != 8 do
+      return :pass
+    end
+
+    let src_ip = read_u32_be(data, 26)
+
+    let count = map_lookup(ping_count, src_ip)
+    let new_count = count + 1
+
+    # Schwellwert VOR map_update pruefen (Helper Calls zerstoeren r1-r5)
+    if new_count > 10 do
+      map_update(ping_count, src_ip, new_count)
+      return :drop
+    end
+
+    map_update(ping_count, src_ip, new_count)
+    return :pass
+  end
+end

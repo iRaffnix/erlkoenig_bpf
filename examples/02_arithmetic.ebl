@@ -1,0 +1,23 @@
+# Arithmetik und Variablen.
+#
+# Demonstriert: let-Bindings, Operatoren (+, -, *, /, %), Ausdruecke.
+# Ergebnis: 42
+
+xdp arithmetic do
+  fn main(ctx) -> u64 do
+    let a = 10
+    let b = 32
+    let sum = a + b
+
+    let x = 6
+    let y = 7
+    let product = x * y
+
+    let big = 100
+    let small = 58
+    let diff = big - small
+
+    # Alle drei Wege ergeben 42
+    return diff
+  end
+end

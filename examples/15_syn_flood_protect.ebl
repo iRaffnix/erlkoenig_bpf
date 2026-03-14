@@ -1,0 +1,64 @@
+# SYN Flood Protection: Zaehlt SYN-Pakete pro Source-IP, droppt ab Schwellwert.
+#
+# Reales Szenario: Ein Angreifer schickt tausende TCP SYN-Pakete von einer IP.
+# Dieses Programm erkennt das Muster und blockiert die Quelle.
+#
+# SYN+ACK (legitime Server-Antworten) werden durchgelassen.
+# Nicht-TCP und Nicht-IPv4 werden ignoriert (pass).
+
+xdp syn_flood_protect do
+  map :syn_count, hash, key: u32, value: u64, max_entries: 65536
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: Ethernet(14) + IP(20) + TCP-Header(20) = 54 Bytes
+    if data + 54 > data_end do
+      return :pass
+    end
+
+    # Nur IPv4
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Nur TCP (Protokoll 6)
+    let protocol = read_u8(data, 23)
+    if protocol != 6 do
+      return :pass
+    end
+
+    # TCP Flags: Offset 47 = Ethernet(14) + IP(20) + TCP-Flags-Byte(13)
+    # Bit 1 = SYN (0x02), Bit 4 = ACK (0x10)
+    let flags = read_u8(data, 47)
+
+    # Kein SYN gesetzt → durchlassen
+    if (flags & 0x02) == 0 do
+      return :pass
+    end
+
+    # SYN+ACK → legitime Antwort, durchlassen
+    if (flags & 0x10) != 0 do
+      return :pass
+    end
+
+    # Ab hier: reines SYN-Paket
+    let src_ip = read_u32_be(data, 26)
+
+    # Zaehler pro Source-IP hochzaehlen
+    let count = map_lookup(syn_count, src_ip)
+    let new_count = count + 1
+
+    # Schwellwert: mehr als 100 SYNs von einer IP → DROP
+    # (Pruefung VOR map_update, da Helper Calls r1-r5 zerstoeren)
+    if new_count > 100 do
+      map_update(syn_count, src_ip, new_count)
+      return :drop
+    end
+
+    map_update(syn_count, src_ip, new_count)
+    return :pass
+  end
+end

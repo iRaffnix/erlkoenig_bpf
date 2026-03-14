@@ -1,0 +1,14 @@
+# Minimales XDP-Programm: Alle Pakete durchlassen.
+#
+# Kompilieren und ausfuehren:
+#   rebar3 shell
+#   > {ok, Bin} = ebl_compile:file("examples/01_hello_pass.ebl").
+#   > {ok, Result} = ebpf_vm:run(Bin, #{}).
+#   > Result.
+#   2  % XDP_PASS
+
+xdp hello do
+  fn main(ctx) -> action do
+    return :pass
+  end
+end

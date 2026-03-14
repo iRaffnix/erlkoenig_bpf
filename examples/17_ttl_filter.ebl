@@ -1,0 +1,53 @@
+# TTL-basierter Filter: Erkennt verdaechtig niedrige TTL-Werte.
+#
+# Reales Szenario: Pakete mit TTL <= 2 sind entweder:
+#   - Traceroute-Probes (ICMP TTL exceeded erzeugen)
+#   - Fehlkonfigurierte Hosts
+#   - Scanning-Versuche
+#
+# Das Programm zaehlt Pakete mit niedrigem TTL pro Source-IP
+# und droppt ab einem Schwellwert.
+#
+# TTL-Feld: Offset 22 = Ethernet(14) + IP-TTL(8)
+
+xdp ttl_filter do
+  map :low_ttl_count, hash, key: u32, value: u64, max_entries: 16384
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: ETH(14) + IP(20) = 34
+    if data + 34 > data_end do
+      return :pass
+    end
+
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # TTL: Offset 22 = Ethernet(14) + IP-Header Byte 8
+    let ttl = read_u8(data, 22)
+
+    # Normaler Traffic hat TTL 64, 128 oder 255
+    # TTL <= 2 ist verdaechtig
+    if ttl > 2 do
+      return :pass
+    end
+
+    let src_ip = read_u32_be(data, 26)
+
+    let count = map_lookup(low_ttl_count, src_ip)
+    let new_count = count + 1
+
+    # Schwellwert VOR map_update pruefen (Helper Calls zerstoeren r1-r5)
+    if new_count > 50 do
+      map_update(low_ttl_count, src_ip, new_count)
+      return :drop
+    end
+
+    map_update(low_ttl_count, src_ip, new_count)
+    return :pass
+  end
+end

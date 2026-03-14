@@ -1,0 +1,31 @@
+{application, erlkoenig_ebpf, [
+    {description, "Programmable eBPF data plane for erlkoenig"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib]},
+    {env, []},
+    {modules, [
+        ebl_compile,
+        ebl_lexer,
+        ebl_parser,
+        ebl_pre_verify,
+        ebl_typecheck,
+        ebpf_codegen,
+        ebpf_ctx,
+        ebpf_insn,
+        ebpf_ir_gen,
+        ebpf_peephole,
+        ebpf_regalloc,
+        ebpf_test_pkt,
+        ebpf_ubpf,
+        ebpf_vm,
+        ebpf_vm_alu,
+        ebpf_vm_decode,
+        ebpf_vm_helpers,
+        ebpf_vm_jmp,
+        ebpf_vm_maps,
+        ebpf_vm_mem
+    ]},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

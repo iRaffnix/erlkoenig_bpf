@@ -1,0 +1,37 @@
+# Packet Parsing: Ethernet + IPv4 Header lesen.
+#
+# Demonstriert: read_u8, read_u16_be, read_u32_be,
+#               Bounds-Checks, Ethertype-Pruefung.
+#
+# Gibt die Source-IP zurueck (als u32, Host-Byte-Order).
+# Bei zu kurzem Paket oder nicht-IPv4: gibt 0 zurueck.
+#
+# In der VM testen:
+#   {ok, Bin} = ebl_compile:file("examples/12_packet_parse.ebl").
+#   Pkt = ebpf_test_pkt:tcp(#{src_ip => {192,168,1,100}, dst_ip => {10,0,0,2}}).
+#   Ctx = ebpf_test_pkt:xdp_ctx(Pkt).
+#   {ok, Result} = ebpf_vm:run(Bin, Ctx).
+#   Result.  % 3232235876 = 0xC0A80164
+
+xdp packet_parse do
+  fn main(ctx) -> u64 do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds-Check: Ethernet (14) + IPv4 (20) = 34 Bytes
+    if data + 34 > data_end do
+      return 0
+    end
+
+    # Ethertype: Offset 12, 2 Bytes, Big-Endian (Netzwerk-Byte-Order)
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 2048 do
+      return 0
+    end
+
+    # Source-IP: Ethernet(14) + IP-Src-Offset(12) = Offset 26
+    let src_ip = read_u32_be(data, 26)
+
+    return src_ip
+  end
+end

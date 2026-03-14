@@ -1,0 +1,27 @@
+# Build artifacts
+_build/
+*.beam
+*.o
+rebar.lock
+rebar3.crashdump
+erl_crash.dump
+c_src/build/
+
+# Generated binaries
+priv/ubpf_port
+
+# Third-party build artifacts (source is tracked via BUILD.md instructions)
+third-party/bld/
+third-party/lib/
+third-party/src/
+
+# Editor/OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# EUnit/Rebar
+.eunit/
+.rebar3/

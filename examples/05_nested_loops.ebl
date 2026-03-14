@@ -1,0 +1,19 @@
+# Verschachtelte Loops mit geteilter Variable.
+#
+# Demonstriert: nested for-Loops, shared mutable state.
+# Ergebnis: 9 (3 x 3 = 9)
+#
+# Historisch: Dies war der erste Bug der durch die Cross-Validation
+# zwischen Erlang-VM und uBPF gefunden wurde (R5 Spill Conflict).
+
+xdp nested_loops do
+  fn main(ctx) -> u64 do
+    let s = 0
+    for i in 0..3 do
+      for j in 0..3 do
+        s = s + 1
+      end
+    end
+    return s
+  end
+end

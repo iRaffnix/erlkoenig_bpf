@@ -1,0 +1,26 @@
+# BPF Map Operationen: lookup, update, delete.
+#
+# Demonstriert: Map-Deklaration, map_update, map_lookup, map_delete,
+#               Method-Syntax (stats.lookup(key)), NULL-Handling.
+#
+# In der VM testen:
+#   {ok, Bin} = ebl_compile:file("examples/09_maps.ebl").
+#   {ok, Result} = ebpf_vm:run(Bin, #{}, #{maps => [{hash, 4, 8, 1024}]}).
+#   Result.  % 42
+
+xdp maps_demo do
+  map :stats, hash, key: u32, value: u64, max_entries: 1024
+
+  fn main(ctx) -> u64 do
+    let key = 1
+    let val = 42
+
+    # Wert in Map schreiben
+    stats.update(key, val)
+
+    # Wert wieder lesen
+    let result = stats.lookup(key)
+
+    return result
+  end
+end

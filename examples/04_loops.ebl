@@ -1,0 +1,27 @@
+# For-Loops mit break und continue.
+#
+# Demonstriert: for..in, mutable Variablen, break, continue, nested Loops.
+# Ergebnis: 9 (Summe der ungeraden Zahlen 1+3+5 = 9, dann break bei 7)
+
+xdp loops do
+  fn main(ctx) -> u64 do
+    let sum = 0
+
+    for i in 0..10 do
+      # Bei 7 aufhoeren
+      if i == 7 do
+        break
+      end
+
+      # Gerade Zahlen ueberspringen
+      if i % 2 == 0 do
+        continue
+      end
+
+      sum = sum + i
+    end
+
+    # sum = 1 + 3 + 5 = 9
+    return sum
+  end
+end

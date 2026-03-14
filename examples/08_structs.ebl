@@ -1,0 +1,18 @@
+# User-definierte Structs mit Feld-Zugriff.
+#
+# Demonstriert: type-Deklaration, Struct-Literale (%Name{}),
+#               Feld-Zugriff (s.field), gemischte Groessen (u32/u64).
+# Ergebnis: 5
+
+xdp structs do
+  type Triple do
+    x: u32
+    y: u32
+    z: u32
+  end
+
+  fn main(ctx) -> u64 do
+    let t = %Triple{x: 1, y: 2, z: 3}
+    return t.y + t.z
+  end
+end

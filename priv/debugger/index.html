@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EBL/BPF Debugger</title>
+<style>
+:root {
+  --bg: #1e1e2e;
+  --bg2: #181825;
+  --bg3: #313244;
+  --fg: #cdd6f4;
+  --fg2: #a6adc8;
+  --accent: #89b4fa;
+  --accent2: #a6e3a1;
+  --red: #f38ba8;
+  --yellow: #f9e2af;
+  --green: #a6e3a1;
+  --peach: #fab387;
+  --highlight: #45475a;
+  --border: #585b70;
+  --font: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Toolbar */
+.toolbar {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.toolbar h1 {
+  font-size: 14px;
+  color: var(--accent);
+  margin-right: 16px;
+  white-space: nowrap;
+}
+.toolbar button {
+  background: var(--bg3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.toolbar button:hover { background: var(--highlight); border-color: var(--accent); }
+.toolbar button:active { transform: scale(0.97); }
+.toolbar button.primary { background: #313280; border-color: var(--accent); color: var(--accent); }
+.toolbar .sep { width: 1px; height: 24px; background: var(--border); }
+.toolbar select {
+  background: var(--bg3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.status-badge {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+.status-badge.running { background: #313280; color: var(--accent); }
+.status-badge.halted { background: #2d3a2d; color: var(--green); }
+.status-badge.error { background: #3a2d2d; color: var(--red); }
+.status-badge.idle { background: var(--bg3); color: var(--fg2); }
+
+/* Main layout */
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+/* Code panels */
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.panel:last-child { border-right: none; }
+.panel-header {
+  background: var(--bg2);
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--fg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  position: relative;
+}
+/* Source editor */
+#source-editor {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: none;
+  padding: 8px;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  tab-size: 2;
+}
+/* Instruction list */
+.insn-list {
+  padding: 4px 0;
+}
+.insn-line {
+  display: flex;
+  padding: 1px 10px;
+  cursor: pointer;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.insn-line:hover { background: var(--highlight); }
+.insn-line.current {
+  background: rgba(137, 180, 250, 0.15);
+  border-left: 3px solid var(--accent);
+  padding-left: 7px;
+}
+.insn-line.breakpoint .insn-pc::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--red);
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.insn-pc {
+  color: var(--fg2);
+  min-width: 36px;
+  text-align: right;
+  margin-right: 12px;
+  user-select: none;
+}
+.insn-text { color: var(--fg); }
+.insn-text .op { color: var(--accent); }
+.insn-text .reg { color: var(--peach); }
+.insn-text .imm { color: var(--green); }
+.insn-text .mem { color: var(--yellow); }
+.insn-text .jmp { color: var(--red); }
+.insn-line.jump-source { background: rgba(137, 180, 250, 0.1); }
+.insn-line.jump-target-fwd { background: rgba(166, 227, 161, 0.15); border-left: 3px solid var(--green); padding-left: 7px; }
+.insn-line.jump-target-bwd { background: rgba(243, 139, 168, 0.15); border-left: 3px solid var(--red); padding-left: 7px; }
+.insn-text .jmp-fwd { color: var(--green); }
+.insn-text .jmp-bwd { color: var(--red); }
+
+/* IR list */
+.ir-list { padding: 4px 0; }
+.ir-block { margin-bottom: 4px; }
+.ir-label {
+  color: var(--yellow);
+  font-weight: bold;
+  padding: 1px 10px;
+  line-height: 1.6;
+}
+.ir-line {
+  padding: 1px 10px 1px 20px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.ir-line .ir-assign { color: var(--peach); }
+.ir-line .ir-op { color: var(--accent); }
+.ir-line .ir-vreg { color: var(--peach); }
+.ir-line .ir-num { color: var(--green); }
+.ir-line .ir-comment { color: var(--fg2); font-style: italic; }
+.ir-term {
+  padding: 1px 10px 1px 20px;
+  line-height: 1.6;
+  color: var(--red);
+  white-space: nowrap;
+}
+
+/* Bottom panels */
+.bottom {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-top: 1px solid var(--border);
+  max-height: 220px;
+  overflow: hidden;
+}
+.bottom .panel { border-bottom: none; }
+.bottom .panel-body { font-size: 12px; padding: 6px 10px; }
+
+/* Registers */
+.reg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px 12px;
+}
+.reg-entry {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.reg-entry.changed { background: rgba(250, 179, 135, 0.15); }
+.reg-name { color: var(--peach); font-weight: bold; }
+.reg-value { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* Stack */
+.stack-entry {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+}
+.stack-off { color: var(--fg2); min-width: 60px; }
+.stack-val { color: var(--fg); }
+
+/* Maps */
+.map-section { margin-bottom: 6px; }
+.map-header { color: var(--accent); font-weight: bold; margin-bottom: 2px; }
+.map-entry { padding-left: 12px; color: var(--fg2); }
+.map-entry .map-key { color: var(--yellow); }
+.map-entry .map-val { color: var(--fg); }
+
+/* Packet input */
+.packet-bar {
+  grid-column: 1 / -1;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.packet-bar label { color: var(--fg2); font-size: 11px; white-space: nowrap; }
+.packet-bar input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.packet-bar select {
+  background: var(--bg3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.result-display {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--fg2);
+  grid-column: 1 / -1;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+}
+.result-display .val { color: var(--green); font-weight: bold; }
+.result-display .err { color: var(--red); font-weight: bold; }
+
+/* Language tabs */
+.lang-tabs {
+  display: flex;
+  gap: 0;
+}
+.lang-tab {
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--fg2);
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.lang-tab:hover { color: var(--fg); }
+.lang-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Error panel */
+.error-panel {
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  max-height: 120px;
+  overflow-y: auto;
+  display: none;
+}
+.error-panel.visible { display: block; }
+.error-item {
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+}
+.error-item:hover { background: var(--highlight); }
+.error-item .error-loc { color: var(--red); font-weight: bold; min-width: 80px; }
+.error-item .error-msg { color: var(--fg); }
+.error-line-highlight { background: rgba(243, 139, 168, 0.15) !important; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+/* Explanation bar */
+.explain-bar {
+  grid-column: 1 / -1;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 6px 12px;
+  min-height: 44px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.explain-category {
+  background: var(--bg3);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 80px;
+  text-align: center;
+}
+.explain-category:empty { display: none; }
+.explain-short {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+.explain-detail {
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Keyboard hint */
+.kbd { font-size: 10px; color: var(--fg2); padding: 1px 4px; background: var(--bg3);
+       border-radius: 2px; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>EBL/BPF Debugger</h1>
+  <select id="example-select" onchange="loadExample()">
+    <option value="">-- Example --</option>
+  </select>
+  <div class="sep"></div>
+  <button class="primary" onclick="initSession()" title="Compile & Init">Compile & Init<span class="kbd">F5</span></button>
+  <button onclick="doStep()" title="Step one instruction">Step<span class="kbd">F10</span></button>
+  <button onclick="doRun()" title="Run to end or breakpoint">Run<span class="kbd">F8</span></button>
+  <button onclick="doReset()" title="Reset VM state">Reset<span class="kbd">F6</span></button>
+  <div class="sep"></div>
+  <button onclick="stepN(10)" title="Step 10 instructions">+10</button>
+  <button onclick="stepN(100)" title="Step 100 instructions">+100</button>
+  <span class="status-badge idle" id="status-badge">IDLE</span>
+</div>
+
+<div class="packet-bar">
+  <label>Packet (hex):</label>
+  <input type="text" id="packet-hex" placeholder="e.g. FFFFFFFFFFFF00000000000008004500... or use preset" />
+  <select id="packet-preset" onchange="applyPreset()">
+    <option value="">-- Preset --</option>
+    <option value="tcp_syn">TCP SYN 10.0.0.1:1234 -> 10.0.0.2:80</option>
+    <option value="tcp_syn_ack">TCP SYN+ACK</option>
+    <option value="udp_dns">UDP DNS Query (port 53)</option>
+    <option value="icmp_echo">ICMP Echo Request</option>
+    <option value="arp">ARP Request</option>
+    <option value="short">Short packet (14 bytes)</option>
+  </select>
+</div>
+
+<div class="main">
+  <!-- Source Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="lang-tabs">
+        <div class="lang-tab active" data-lang="ebl" onclick="switchLanguage('ebl')">EBL</div>
+        <div class="lang-tab" data-lang="elixir" onclick="switchLanguage('elixir')">Elixir DSL</div>
+      </div>
+      <span id="source-info"></span>
+    </div>
+    <div class="panel-body">
+      <textarea id="source-editor" spellcheck="false">xdp syn_flood_protect do
+  map :syn_count, hash, key: u32, value: u64, max_entries: 65536
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds: Ethernet(14) + IP(20) + TCP-Header(20) = 54 Bytes
+    if data + 54 > data_end do
+      return :pass
+    end
+
+    # Nur IPv4
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 0x0800 do
+      return :pass
+    end
+
+    # Nur TCP (Protokoll 6)
+    let protocol = read_u8(data, 23)
+    if protocol != 6 do
+      return :pass
+    end
+
+    # TCP Flags
+    let flags = read_u8(data, 47)
+
+    # Kein SYN gesetzt -> durchlassen
+    if (flags & 0x02) == 0 do
+      return :pass
+    end
+
+    # SYN+ACK -> legitime Antwort, durchlassen
+    if (flags & 0x10) != 0 do
+      return :pass
+    end
+
+    # Ab hier: reines SYN-Paket
+    let src_ip = read_u32_be(data, 26)
+
+    # Zaehler pro Source-IP hochzaehlen
+    let count = map_lookup(syn_count, src_ip)
+    let new_count = count + 1
+
+    # Schwellwert: mehr als 100 SYNs von einer IP -> DROP
+    if new_count > 100 do
+      map_update(syn_count, src_ip, new_count)
+      return :drop
+    end
+
+    map_update(syn_count, src_ip, new_count)
+    return :pass
+  end
+end</textarea>
+      <div class="error-panel" id="error-panel"></div>
+    </div>
+  </div>
+
+  <!-- IR Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>Intermediate Representation</span>
+      <span id="ir-info"></span>
+    </div>
+    <div class="panel-body" id="ir-panel">
+      <div class="ir-list" id="ir-list">
+        <div style="padding: 20px; color: var(--fg2);">
+          Click "Compile & Init" to see IR.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Instructions Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>BPF Instructions</span>
+      <span id="insn-info"></span>
+    </div>
+    <div class="panel-body" id="insn-panel">
+      <div class="insn-list" id="insn-list">
+        <div style="padding: 20px; color: var(--fg2);">
+          Click "Compile & Init" to see generated instructions.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom panels -->
+  <div class="bottom">
+    <!-- Registers -->
+    <div class="panel">
+      <div class="panel-header"><span>Registers</span></div>
+      <div class="panel-body">
+        <div class="reg-grid" id="reg-grid"></div>
+      </div>
+    </div>
+    <!-- Stack -->
+    <div class="panel">
+      <div class="panel-header"><span>Stack</span></div>
+      <div class="panel-body" id="stack-panel">
+        <div style="color: var(--fg2);">No active stack slots</div>
+      </div>
+    </div>
+    <!-- Maps -->
+    <div class="panel">
+      <div class="panel-header"><span>Maps</span></div>
+      <div class="panel-body" id="maps-panel">
+        <div style="color: var(--fg2);">No maps</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Explanation panel -->
+  <div class="explain-bar" id="explain-bar">
+    <div class="explain-category" id="explain-category"></div>
+    <div class="explain-short" id="explain-short">Hover over an instruction or step to see its explanation.</div>
+    <div class="explain-detail" id="explain-detail"></div>
+  </div>
+</div>
+
+<div class="result-display" id="result-display"></div>
+
+<script>
+// State
+let sessionId = null;
+let instructions = [];
+let breakpoints = new Set();
+let prevRegs = {};
+let currentPC = -1;
+let currentLanguage = 'ebl';
+
+// Elixir DSL example source
+const ELIXIR_EXAMPLE = `import ErlkoenigEbpfDsl.Builder
+
+state = new("pass_all")
+state = set_main(state, quote(do: :pass))
+to_ast(state)`;
+
+// Store sources per language so switching preserves edits
+const savedSources = { ebl: null, elixir: ELIXIR_EXAMPLE };
+
+function switchLanguage(lang) {
+  if (lang === currentLanguage) return;
+  // Save current source
+  savedSources[currentLanguage] = document.getElementById('source-editor').value;
+  currentLanguage = lang;
+  // Update tabs
+  document.querySelectorAll('.lang-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.lang === lang);
+  });
+  // Restore source for new language
+  if (savedSources[lang]) {
+    document.getElementById('source-editor').value = savedSources[lang];
+  }
+}
+
+// Packet presets (raw ethernet frames)
+const PRESETS = {
+  tcp_syn: buildTcpPacket({srcIp: '10.0.0.1', dstIp: '10.0.0.2', srcPort: 1234, dstPort: 80, flags: 0x02, ttl: 64}),
+  tcp_syn_ack: buildTcpPacket({srcIp: '10.0.0.2', dstIp: '10.0.0.1', srcPort: 80, dstPort: 1234, flags: 0x12, ttl: 64}),
+  udp_dns: buildUdpPacket({srcIp: '10.0.0.1', dstIp: '8.8.8.8', srcPort: 12345, dstPort: 53, ttl: 64}),
+  icmp_echo: buildIcmpPacket({srcIp: '10.0.0.1', dstIp: '10.0.0.2', ttl: 64}),
+  arp: buildArpPacket({senderIp: '10.0.0.1', targetIp: '10.0.0.2'}),
+  short: 'ffffffffffff000000000000ffff'
+};
+
+function buildTcpPacket({srcIp, dstIp, srcPort, dstPort, flags, ttl}) {
+  // Ethernet header (14 bytes)
+  let eth = 'ffffffffffff' + '000000000001' + '0800';
+  // IP header (20 bytes): version/ihl=45, tos=0, total_len=40, id=0, flags/frag=4000, ttl, proto=6(TCP)
+  let ip = '4500' + '0028' + '0000' + '4000' + hex8(ttl) + '06' + '0000' + ipToHex(srcIp) + ipToHex(dstIp);
+  // TCP header (20 bytes): src_port, dst_port, seq=0, ack=0, data_offset=50, flags, window=ffff
+  let tcp = hex16(srcPort) + hex16(dstPort) + '00000000' + '00000000' + '50' + hex8(flags) + 'ffff' + '0000' + '0000';
+  return eth + ip + tcp;
+}
+
+function buildUdpPacket({srcIp, dstIp, srcPort, dstPort, ttl}) {
+  let eth = 'ffffffffffff' + '000000000001' + '0800';
+  let ip = '4500' + '001c' + '0000' + '4000' + hex8(ttl) + '11' + '0000' + ipToHex(srcIp) + ipToHex(dstIp);
+  let udp = hex16(srcPort) + hex16(dstPort) + '0008' + '0000';
+  return eth + ip + udp;
+}
+
+function buildIcmpPacket({srcIp, dstIp, ttl}) {
+  let eth = 'ffffffffffff' + '000000000001' + '0800';
+  let ip = '4500' + '001c' + '0000' + '4000' + hex8(ttl) + '01' + '0000' + ipToHex(srcIp) + ipToHex(dstIp);
+  let icmp = '0800' + '0000' + '0001' + '0001';
+  return eth + ip + icmp;
+}
+
+function buildArpPacket({senderIp, targetIp}) {
+  let eth = 'ffffffffffff' + '000000000001' + '0806';
+  let arp = '0001' + '0800' + '06' + '04' + '0001';
+  arp += '000000000001' + ipToHex(senderIp);
+  arp += '000000000000' + ipToHex(targetIp);
+  return eth + arp;
+}
+
+function ipToHex(ip) { return ip.split('.').map(n => hex8(parseInt(n))).join(''); }
+function hex8(n) { return (n & 0xFF).toString(16).padStart(2, '0'); }
+function hex16(n) { return (n & 0xFFFF).toString(16).padStart(4, '0'); }
+
+function applyPreset() {
+  const sel = document.getElementById('packet-preset');
+  if (sel.value && PRESETS[sel.value]) {
+    document.getElementById('packet-hex').value = PRESETS[sel.value];
+  }
+}
+
+// API calls
+async function api(endpoint, data) {
+  const resp = await fetch('/api/' + endpoint, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data || {})
+  });
+  return await resp.json();
+}
+
+async function initSession() {
+  const source = document.getElementById('source-editor').value;
+  const packetHex = document.getElementById('packet-hex').value.replace(/\s/g, '');
+  const result = await api('init', {source, packet_hex: packetHex, language: currentLanguage});
+  if (result.error) {
+    if (result.error_detail) {
+      showErrors(result.error_detail);
+    }
+    showError(result.error);
+    return;
+  }
+  clearErrors();
+  sessionId = result.session_id;
+  instructions = result.instructions;
+  window.sourceMap = result.source_map || {};
+  breakpoints.clear();
+  renderInstructions();
+  renderIR(result.ir || []);
+  updateState(result.state);
+  document.getElementById('insn-info').textContent = instructions.length + ' insns';
+  document.getElementById('result-display').innerHTML = '';
+}
+
+async function doStep() {
+  if (!sessionId) return;
+  const result = await api('step', {session_id: sessionId});
+  if (result.error) { showError(result.error); return; }
+  updateState(result.state);
+}
+
+async function stepN(n) {
+  if (!sessionId) return;
+  for (let i = 0; i < n; i++) {
+    const result = await api('step', {session_id: sessionId});
+    if (result.error) { showError(result.error); return; }
+    if (result.state.status !== 'running') {
+      updateState(result.state);
+      return;
+    }
+    if (i === n - 1) updateState(result.state);
+  }
+}
+
+async function doRun() {
+  if (!sessionId) return;
+  if (breakpoints.size > 0) {
+    const result = await api('run_to_breakpoint', {
+      session_id: sessionId,
+      breakpoints: Array.from(breakpoints)
+    });
+    if (result.error) { showError(result.error); return; }
+    updateState(result.state);
+  } else {
+    const result = await api('run', {session_id: sessionId});
+    if (result.error) { showError(result.error); return; }
+    updateState(result.state);
+  }
+}
+
+async function doReset() {
+  if (!sessionId) return;
+  const packetHex = document.getElementById('packet-hex').value.replace(/\s/g, '');
+  const result = await api('reset', {session_id: sessionId, packet_hex: packetHex});
+  if (result.error) { showError(result.error); return; }
+  updateState(result.state);
+  document.getElementById('result-display').innerHTML = '';
+}
+
+function showError(msg) {
+  document.getElementById('result-display').innerHTML =
+    '<span class="err">Error: ' + escapeHtml(msg) + '</span>';
+}
+
+function showErrors(errorDetail) {
+  const panel = document.getElementById('error-panel');
+  panel.innerHTML = '';
+  if (!errorDetail) return;
+  const msg = errorDetail.message || '';
+  const line = errorDetail.line || null;
+  const col = errorDetail.col || null;
+  const phase = errorDetail.phase || '';
+  const item = document.createElement('div');
+  item.className = 'error-item';
+  const locText = line ? ('L' + line + (col ? ':' + col : '')) : phase;
+  item.innerHTML =
+    '<span class="error-loc">' + escapeHtml(locText) + '</span>' +
+    '<span class="error-msg">' + escapeHtml(msg) + '</span>';
+  if (line) {
+    item.addEventListener('click', function() {
+      const editor = document.getElementById('source-editor');
+      const lineHeight = 20.8;
+      editor.scrollTop = Math.max(0, (line - 1) * lineHeight - 60);
+    });
+  }
+  panel.appendChild(item);
+  panel.classList.add('visible');
+}
+
+function clearErrors() {
+  const panel = document.getElementById('error-panel');
+  panel.innerHTML = '';
+  panel.classList.remove('visible');
+}
+
+function highlightSourceLine(pc) {
+  const editor = document.getElementById('source-editor');
+  // Remove previous source highlight
+  editor.style.background = '';
+  if (!window.sourceMap) return;
+  const key = String(pc);
+  const mapping = window.sourceMap[key];
+  if (mapping && mapping.line) {
+    const lines = editor.value.split('\n');
+    const lineNum = mapping.line;
+    if (lineNum > 0 && lineNum <= lines.length) {
+      // Calculate line position and scroll
+      const lineHeight = 20.8; // approximate
+      const scrollTo = (lineNum - 1) * lineHeight;
+      editor.scrollTop = Math.max(0, scrollTo - 60);
+      // Update source-info with current line
+      document.getElementById('source-info').textContent = 'Line ' + lineNum;
+    }
+  }
+}
+
+// Rendering
+function renderInstructions() {
+  const list = document.getElementById('insn-list');
+  list.innerHTML = '';
+  instructions.forEach((insn, idx) => {
+    const div = document.createElement('div');
+    div.className = 'insn-line';
+    div.dataset.pc = insn.pc;
+    div.innerHTML =
+      '<span class="insn-pc">' + insn.pc + '</span>' +
+      '<span class="insn-text">' + colorizeInsn(insn.text) + '</span>';
+    div.addEventListener('click', () => toggleBreakpoint(insn.pc, div));
+    div.addEventListener('mouseenter', () => showExplanation(insn));
+    // Jump hover highlighting
+    div.addEventListener('mouseenter', () => {
+      const jumpMatch = insn.text.match(/^(ja|jeq|jne|jgt|jge|jlt|jle|jset|jsgt|jsge|jslt|jsle)\b.*?([+-]\d+)$/);
+      if (jumpMatch) {
+        const offset = parseInt(jumpMatch[2]);
+        const targetPC = insn.pc + 1 + offset;
+        div.classList.add('jump-source');
+        const targetEl = document.querySelector('.insn-line[data-pc="' + targetPC + '"]');
+        if (targetEl) {
+          targetEl.classList.add(offset >= 0 ? 'jump-target-fwd' : 'jump-target-bwd');
+          targetEl.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+        }
+      }
+    });
+    div.addEventListener('mouseleave', () => {
+      document.querySelectorAll('.jump-source, .jump-target-fwd, .jump-target-bwd').forEach(el => {
+        el.classList.remove('jump-source', 'jump-target-fwd', 'jump-target-bwd');
+      });
+    });
+    list.appendChild(div);
+  });
+}
+
+function showExplanation(insn) {
+  const cat = insn.explain_category || '';
+  const short = insn.explain_short || '';
+  const detail = insn.explain_detail || '';
+  document.getElementById('explain-category').textContent = cat;
+  document.getElementById('explain-short').textContent = short;
+  document.getElementById('explain-detail').textContent = detail;
+}
+
+function renderIR(blocks) {
+  const list = document.getElementById('ir-list');
+  list.innerHTML = '';
+  if (!blocks || blocks.length === 0) {
+    list.innerHTML = '<div style="padding: 20px; color: var(--fg2);">No IR available</div>';
+    return;
+  }
+  let totalInstrs = 0;
+  blocks.forEach(block => {
+    // Block label
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'ir-label';
+    labelDiv.textContent = block.label + ':';
+    list.appendChild(labelDiv);
+
+    // Instructions
+    block.instrs.forEach(text => {
+      if (!text || text === '') return;
+      totalInstrs++;
+      const div = document.createElement('div');
+      div.className = 'ir-line';
+      div.innerHTML = colorizeIR(text);
+      list.appendChild(div);
+    });
+
+    // Terminator
+    const termDiv = document.createElement('div');
+    termDiv.className = 'ir-term';
+    termDiv.innerHTML = colorizeIR(block.term);
+    list.appendChild(termDiv);
+  });
+  document.getElementById('ir-info').textContent = blocks.length + ' blocks, ' + totalInstrs + ' instrs';
+}
+
+function colorizeIR(text) {
+  return text
+    // Comments (// ...)
+    .replace(/(\/\/.*)$/, '<span class="ir-comment">$1</span>')
+    // Virtual registers (v0, v1, ..., v_ctx, v_fp, v_ret)
+    .replace(/\b(v_ctx|v_fp|v_ret|v\d+)\b/g, '<span class="ir-vreg">$1</span>')
+    // Block labels (entry, L0, L1, ...)
+    .replace(/\b(entry|L\d+)\b/g, '<span class="ir-op">$1</span>')
+    // Keywords
+    .replace(/\b(if|then|else|return|br|load|store|map_fd|be)\b/g, '<span class="ir-op">$1</span>')
+    // Helper calls
+    .replace(/\b(map_lookup_elem|map_update_elem|map_delete_elem|ktime_get_ns)\b/g, '<span class="ir-op">$1</span>')
+    // Numbers
+    .replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, '<span class="ir-num">$1</span>')
+    // Operators
+    .replace(/([=!<>]=|[+\-*\/%&|^]|<<|>>)/g, '<span class="ir-assign">$1</span>');
+}
+
+function colorizeInsn(text) {
+  // Colorize instruction parts
+  return text
+    .replace(/^(\w+)/, '<span class="op">$1</span>')
+    .replace(/\b(r\d{1,2})\b/g, '<span class="reg">$1</span>')
+    .replace(/\b(0x[0-9a-fA-F]+)\b/g, '<span class="imm">$1</span>')
+    .replace(/(\[.*?\])/g, '<span class="mem">$1</span>')
+    .replace(/(\+\d+)(?![\w])/g, '<span class="jmp-fwd">$1</span>')
+    .replace(/(-\d+)(?![\w])/g, '<span class="jmp-bwd">$1</span>');
+}
+
+function toggleBreakpoint(pc, elem) {
+  if (breakpoints.has(pc)) {
+    breakpoints.delete(pc);
+    elem.classList.remove('breakpoint');
+  } else {
+    breakpoints.add(pc);
+    elem.classList.add('breakpoint');
+  }
+}
+
+function updateState(state) {
+  // Update status badge
+  const badge = document.getElementById('status-badge');
+  badge.className = 'status-badge ' + state.status;
+  badge.textContent = state.status.toUpperCase();
+  if (state.status === 'halted') {
+    badge.textContent = 'HALTED (' + xdpAction(state.result) + ')';
+  }
+
+  // Update current PC highlighting
+  currentPC = state.pc;
+  document.querySelectorAll('.insn-line').forEach(el => {
+    el.classList.toggle('current', parseInt(el.dataset.pc) === currentPC);
+  });
+  // Scroll current instruction into view and show its explanation
+  const currentEl = document.querySelector('.insn-line.current');
+  if (currentEl) currentEl.scrollIntoView({block: 'center', behavior: 'smooth'});
+  const currentInsn = instructions.find(i => i.pc === currentPC);
+  if (currentInsn) showExplanation(currentInsn);
+
+  // Source-map: highlight corresponding source line
+  highlightSourceLine(currentPC);
+
+  // Update registers
+  const regGrid = document.getElementById('reg-grid');
+  regGrid.innerHTML = '';
+  const regNames = ['R0 (ret)', 'R1', 'R2', 'R3', 'R4', 'R5 (scratch)', 'R6 (ctx)', 'R7', 'R8', 'R9', 'R10 (fp)'];
+  state.registers.forEach(r => {
+    const changed = prevRegs[r.index] !== undefined && prevRegs[r.index] !== r.value;
+    const div = document.createElement('div');
+    div.className = 'reg-entry' + (changed ? ' changed' : '');
+    div.innerHTML =
+      '<span class="reg-name">' + regNames[r.index] + '</span>' +
+      '<span class="reg-value">' + r.value + '</span>';
+    regGrid.appendChild(div);
+  });
+  prevRegs = {};
+  state.registers.forEach(r => { prevRegs[r.index] = r.value; });
+
+  // Update stack
+  const stackPanel = document.getElementById('stack-panel');
+  if (state.stack.length === 0) {
+    stackPanel.innerHTML = '<div style="color: var(--fg2);">Stack empty</div>';
+  } else {
+    stackPanel.innerHTML = state.stack.map(s =>
+      '<div class="stack-entry">' +
+      '<span class="stack-off">FP' + s.offset + '</span>' +
+      '<span class="stack-val">' + s.value + '</span>' +
+      '</div>'
+    ).join('');
+  }
+
+  // Update maps
+  const mapsPanel = document.getElementById('maps-panel');
+  if (state.maps.length === 0) {
+    mapsPanel.innerHTML = '<div style="color: var(--fg2);">No map entries</div>';
+  } else {
+    mapsPanel.innerHTML = state.maps.map(m => {
+      let html = '<div class="map-section">';
+      html += '<div class="map-header">Map #' + m.fd + ' (' + m.type + ', ' + m.entries.length + ' entries)</div>';
+      m.entries.forEach(e => {
+        html += '<div class="map-entry"><span class="map-key">' + e.key + '</span> = <span class="map-val">' + e.value + '</span></div>';
+      });
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  // Update result
+  if (state.status === 'halted') {
+    const action = xdpAction(state.result);
+    document.getElementById('result-display').innerHTML =
+      'Program exited with: <span class="val">' + state.result + ' (' + action + ')</span>' +
+      ' after ' + state.insn_executed + ' instructions';
+  } else if (state.status === 'error') {
+    document.getElementById('result-display').innerHTML =
+      '<span class="err">Error: ' + escapeHtml(String(state.result)) + '</span>';
+  } else {
+    document.getElementById('result-display').innerHTML =
+      'PC: ' + state.pc + ' | Instructions executed: ' + state.insn_executed;
+  }
+}
+
+function xdpAction(code) {
+  const actions = {0: 'XDP_ABORTED', 1: 'XDP_DROP', 2: 'XDP_PASS', 3: 'XDP_TX', 4: 'XDP_REDIRECT'};
+  return actions[code] || 'unknown';
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Load examples list
+async function loadExamples() {
+  try {
+    const resp = await fetch('/api/examples');
+    const data = await resp.json();
+    const select = document.getElementById('example-select');
+    (data.examples || []).forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+  } catch(e) {}
+}
+
+async function loadExample() {
+  const select = document.getElementById('example-select');
+  if (!select.value) return;
+  try {
+    const resp = await fetch('/api/example/' + select.value);
+    const data = await resp.json();
+    if (data.source) {
+      document.getElementById('source-editor').value = data.source;
+    }
+  } catch(e) {
+    showError('Failed to load example: ' + e.message);
+  }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'F5') { e.preventDefault(); initSession(); }
+  if (e.key === 'F10') { e.preventDefault(); doStep(); }
+  if (e.key === 'F8') { e.preventDefault(); doRun(); }
+  if (e.key === 'F6') { e.preventDefault(); doReset(); }
+});
+
+// Init: set default packet and load examples
+document.getElementById('packet-hex').value = PRESETS.tcp_syn;
+loadExamples();
+
+// Init registers display
+const regGrid = document.getElementById('reg-grid');
+const regNames = ['R0 (ret)', 'R1', 'R2', 'R3', 'R4', 'R5 (scratch)', 'R6 (ctx)', 'R7', 'R8', 'R9', 'R10 (fp)'];
+regNames.forEach((name, i) => {
+  const div = document.createElement('div');
+  div.className = 'reg-entry';
+  div.innerHTML =
+    '<span class="reg-name">' + name + '</span>' +
+    '<span class="reg-value">0x00000000</span>';
+  regGrid.appendChild(div);
+});
+</script>
+</body>
+</html>

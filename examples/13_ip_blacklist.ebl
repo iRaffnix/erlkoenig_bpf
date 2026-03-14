@@ -1,0 +1,42 @@
+# IP Blacklist: Source-IP gegen Map pruefen, bei Treffer droppen.
+#
+# Demonstriert: Paket-Parsing + Map-Lookup + Action-Return.
+# Erstes echtes XDP-Programm mit real-world Logik.
+#
+# In der VM testen:
+#   {ok, Bin} = ebl_compile:file("examples/13_ip_blacklist.ebl").
+#   Pkt = ebpf_test_pkt:tcp(#{src_ip => {10,0,0,1}, dst_ip => {10,0,0,2}}).
+#   Ctx = ebpf_test_pkt:xdp_ctx(Pkt).
+#   Opts = #{maps => [{hash, 4, 8, 10000}]}.
+#   {ok, Result} = ebpf_vm:run(Bin, Ctx, Opts).
+
+xdp ip_blacklist do
+  map :blacklist, hash, key: u32, value: u64, max_entries: 10000
+
+  fn main(ctx) -> action do
+    let data = ctx.data
+    let data_end = ctx.data_end
+
+    # Bounds-Check: Ethernet (14) + IPv4 (20) = 34 Bytes
+    if data + 34 > data_end do
+      return :pass
+    end
+
+    # Ethertype: Offset 12, Big-Endian
+    let ethertype = read_u16_be(data, 12)
+    if ethertype != 2048 do
+      return :pass
+    end
+
+    # Source-IP: Offset 26
+    let src_ip = read_u32_be(data, 26)
+
+    # Blacklist-Lookup
+    let found = map_lookup(blacklist, src_ip)
+    if found != 0 do
+      return :drop
+    end
+
+    return :pass
+  end
+end

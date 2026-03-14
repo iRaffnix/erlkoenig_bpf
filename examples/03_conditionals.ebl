@@ -1,0 +1,21 @@
+# Kontrollfluss: if/elif/else und Vergleichsoperatoren.
+#
+# Demonstriert: if, elif, else, ==, !=, <, >, <=, >=
+# Ergebnis: 20
+
+xdp conditionals do
+  fn main(ctx) -> u64 do
+    let x = 2
+
+    # Match-artige Kaskade mit elif
+    if x == 1 do
+      return 10
+    elif x == 2 do
+      return 20
+    elif x == 3 do
+      return 30
+    else
+      return 40
+    end
+  end
+end

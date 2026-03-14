@@ -1,0 +1,33 @@
+# Rate Limiter: Pakete pro Interface zaehlen und bei Ueberschreitung droppen.
+#
+# Demonstriert: Maps + Context + Conditionals zusammen.
+#
+# In der VM testen:
+#   {ok, Bin} = ebl_compile:file("examples/10_rate_limiter.ebl").
+#   CtxBin = <<0:32, 0:32, 0:32, 1:32/little, 0:32, 0:32>>.
+#   Opts = #{maps => [{hash, 4, 8, 256}]}.
+#   {ok, Result} = ebpf_vm:run(Bin, #{ctx => CtxBin}, Opts).
+
+xdp rate_limiter do
+  map :counters, hash, key: u32, value: u64, max_entries: 256
+
+  fn main(ctx) -> action do
+    let key = ctx.ingress_ifindex
+
+    # Zaehler nachschlagen
+    let count = map_lookup(counters, key)
+
+    if count != 0 do
+      if count > 100 do
+        return :drop
+      end
+      # Zaehler inkrementieren
+      map_update(counters, key, count + 1)
+    else
+      # Erster Zugriff
+      map_update(counters, key, 1)
+    end
+
+    return :pass
+  end
+end
