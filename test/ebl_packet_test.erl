@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_packet_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%% ===================================================================
 %%% Integration tests for WP-021c: EBL packet parsing programs.
@@ -32,7 +49,9 @@ parse_arp_returns_zero_test() ->
 
 parse_short_pkt_returns_zero_test() ->
     %% Too short for Ethernet+IP (< 34 bytes)
-    Pkt = <<0:100>>,  %% 12.5 bytes rounded to 13
+
+    %% 12.5 bytes rounded to 13
+    Pkt = <<0:100>>,
     assert_ebl_xdp("examples/12_packet_parse.ebl", Pkt, [], 0).
 
 parse_icmp_src_ip_test() ->
@@ -123,10 +142,11 @@ compile(Path) ->
 assert_ebl_xdp(Path, Pkt, MapSpecs, Expected) ->
     Bin = compile(Path),
     Ctx = ebpf_test_pkt:xdp_ctx(Pkt),
-    Opts = case MapSpecs of
-        [] -> #{};
-        _ -> #{maps => MapSpecs}
-    end,
+    Opts =
+        case MapSpecs of
+            [] -> #{};
+            _ -> #{maps => MapSpecs}
+        end,
     {ok, Result} = ebpf_vm:run(Bin, Ctx, Opts),
     ?assertEqual(Expected, Result).
 
@@ -134,10 +154,11 @@ assert_ebl_xdp_xval(Path, Pkt, MapSpecs, Expected) ->
     Bin = compile(Path),
     %% Erlang VM
     Ctx = ebpf_test_pkt:xdp_ctx(Pkt),
-    Opts = case MapSpecs of
-        [] -> #{};
-        _ -> #{maps => MapSpecs}
-    end,
+    Opts =
+        case MapSpecs of
+            [] -> #{};
+            _ -> #{maps => MapSpecs}
+        end,
     {ok, ErlResult} = ebpf_vm:run(Bin, Ctx, Opts),
     ?assertEqual(Expected, ErlResult),
     %% uBPF cross-validation

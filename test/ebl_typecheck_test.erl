@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_typecheck_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebl_ast.hrl").
 
 %%% ===================================================================
@@ -65,7 +82,6 @@ xdp_u64(Body) ->
         <<"end">>
     ]).
 
-
 %% Assert typecheck succeeds
 assert_ok(Src) ->
     ?assertEqual(ok, typecheck(Src)).
@@ -97,34 +113,57 @@ valid_arithmetic_test() ->
     assert_ok(xdp_u64(<<"    let x = 1 + 2 * 3\n    return x">>)).
 
 valid_comparison_test() ->
-    assert_ok(xdp(<<"    let x = 1\n    if x == 0 do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(<<"    let x = 1\n    if x == 0 do\n      return :drop\n    end\n    return :pass">>)
+    ).
 
 valid_logical_and_test() ->
-    assert_ok(xdp(<<"    let x = 1\n    let y = 2\n    if x > 0 && y > 0 do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(
+            <<"    let x = 1\n    let y = 2\n    if x > 0 && y > 0 do\n      return :drop\n    end\n    return :pass">>
+        )
+    ).
 
 valid_logical_or_test() ->
-    assert_ok(xdp(<<"    let x = 1\n    if x == 0 || x == 1 do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(
+            <<"    let x = 1\n    if x == 0 || x == 1 do\n      return :drop\n    end\n    return :pass">>
+        )
+    ).
 
 valid_negation_test() ->
-    assert_ok(xdp(<<"    let x = true\n    if !x do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(<<"    let x = true\n    if !x do\n      return :drop\n    end\n    return :pass">>)
+    ).
 
 valid_for_loop_test() ->
-    assert_ok(xdp_u64(<<"    let sum = 0\n    for i in 0..10 do\n      sum = sum + i\n    end\n    return sum">>)).
+    assert_ok(
+        xdp_u64(
+            <<"    let sum = 0\n    for i in 0..10 do\n      sum = sum + i\n    end\n    return sum">>
+        )
+    ).
 
 valid_if_elif_else_test() ->
-    assert_ok(xdp(<<
-        "    let x = 1\n"
-        "    if x == 0 do\n"
-        "      return :drop\n"
-        "    elif x == 1 do\n"
-        "      return :pass\n"
-        "    else\n"
-        "      return :drop\n"
-        "    end\n"
-        "    return :pass">>)).
+    assert_ok(
+        xdp(<<
+            "    let x = 1\n"
+            "    if x == 0 do\n"
+            "      return :drop\n"
+            "    elif x == 1 do\n"
+            "      return :pass\n"
+            "    else\n"
+            "      return :drop\n"
+            "    end\n"
+            "    return :pass"
+        >>)
+    ).
 
 valid_bitwise_ops_test() ->
-    assert_ok(xdp_u64(<<"    let x = 0xFF & 0x0F\n    let y = x | 0xF0\n    let z = y ^ 0x55\n    return z">>)).
+    assert_ok(
+        xdp_u64(
+            <<"    let x = 0xFF & 0x0F\n    let y = x | 0xF0\n    let z = y ^ 0x55\n    return z">>
+        )
+    ).
 
 valid_shift_ops_test() ->
     assert_ok(xdp_u64(<<"    let x = 1 << 4\n    let y = x >> 2\n    return y">>)).
@@ -145,12 +184,14 @@ valid_sizeof_test() ->
 undefined_var_test() ->
     assert_has_error(
         xdp_u64(<<"    let y = unknown_var\n    return y">>),
-        undefined_var).
+        undefined_var
+    ).
 
 undefined_var_in_expr_test() ->
     assert_has_error(
         xdp_u64(<<"    return x + 1">>),
-        undefined_var).
+        undefined_var
+    ).
 
 %%% ===================================================================
 %%% 3. Undefined function
@@ -159,7 +200,8 @@ undefined_var_in_expr_test() ->
 undefined_fn_test() ->
     assert_has_error(
         xdp_u64(<<"    return nonexistent_fn(1, 2)">>),
-        undefined_fn).
+        undefined_fn
+    ).
 
 %%% ===================================================================
 %%% 4. Wrong argument count
@@ -219,7 +261,8 @@ type_mismatch_struct_to_scalar_test() ->
 undefined_type_test() ->
     assert_has_error(
         xdp(<<"    let p = %NoSuchType{x: 1}\n    return :pass">>),
-        undefined_type).
+        undefined_type
+    ).
 
 %%% ===================================================================
 %%% 7. Unknown struct field
@@ -249,43 +292,56 @@ invalid_action_xdp_test() ->
     %% :ok is a TC action, not valid for XDP
     assert_has_error(
         xdp(<<"    return :ok">>),
-        invalid_action).
+        invalid_action
+    ).
 
 invalid_action_tc_test() ->
     %% :redirect is XDP-only
     assert_has_error(
         tc(<<"    return :redirect">>),
-        invalid_action).
+        invalid_action
+    ).
 
 invalid_action_bogus_test() ->
     assert_has_error(
         xdp(<<"    return :bogus_action">>),
-        invalid_action).
+        invalid_action
+    ).
 
 invalid_action_cgroup_test() ->
     %% :tx should fail for cgroup
     assert_has_error(
         cgroup(<<"    return :tx">>),
-        invalid_action).
+        invalid_action
+    ).
 
 %%% ===================================================================
 %%% 9. Valid actions per program type
 %%% ===================================================================
 
 valid_xdp_actions_test() ->
-    lists:foreach(fun(A) ->
-        assert_ok(xdp(iolist_to_binary([<<"    return :">>, A])))
-    end, [<<"drop">>, <<"pass">>, <<"tx">>, <<"redirect">>, <<"aborted">>]).
+    lists:foreach(
+        fun(A) ->
+            assert_ok(xdp(iolist_to_binary([<<"    return :">>, A])))
+        end,
+        [<<"drop">>, <<"pass">>, <<"tx">>, <<"redirect">>, <<"aborted">>]
+    ).
 
 valid_tc_actions_test() ->
-    lists:foreach(fun(A) ->
-        assert_ok(tc(iolist_to_binary([<<"    return :">>, A])))
-    end, [<<"ok">>, <<"shot">>, <<"pipe">>, <<"drop">>, <<"pass">>]).
+    lists:foreach(
+        fun(A) ->
+            assert_ok(tc(iolist_to_binary([<<"    return :">>, A])))
+        end,
+        [<<"ok">>, <<"shot">>, <<"pipe">>, <<"drop">>, <<"pass">>]
+    ).
 
 valid_cgroup_actions_test() ->
-    lists:foreach(fun(A) ->
-        assert_ok(cgroup(iolist_to_binary([<<"    return :">>, A])))
-    end, [<<"allow">>, <<"deny">>]).
+    lists:foreach(
+        fun(A) ->
+            assert_ok(cgroup(iolist_to_binary([<<"    return :">>, A])))
+        end,
+        [<<"allow">>, <<"deny">>]
+    ).
 
 %%% ===================================================================
 %%% 10. expect_bool — rejects non-scalar types in boolean context
@@ -331,12 +387,15 @@ expect_bool_action_in_if_test() ->
         "    if a do\n"
         "      return :drop\n"
         "    end\n"
-        "    return :pass">>),
+        "    return :pass"
+    >>),
     assert_has_error(Src, expected_bool).
 
 %% Integer scalars should be allowed in boolean context (C-like truthiness)
 expect_bool_integer_ok_test() ->
-    assert_ok(xdp(<<"    let x = 42\n    if x do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(<<"    let x = 42\n    if x do\n      return :drop\n    end\n    return :pass">>)
+    ).
 
 expect_bool_bool_ok_test() ->
     assert_ok(xdp(<<"    if true do\n      return :drop\n    end\n    return :pass">>)).
@@ -348,21 +407,28 @@ expect_bool_bool_ok_test() ->
 bool_in_arithmetic_add_test() ->
     assert_has_error(
         xdp_u64(<<"    let x = true + 1">>),
-        bool_in_arithmetic).
+        bool_in_arithmetic
+    ).
 
 bool_in_arithmetic_sub_test() ->
     assert_has_error(
         xdp_u64(<<"    let x = 5 - false">>),
-        bool_in_arithmetic).
+        bool_in_arithmetic
+    ).
 
 bool_in_arithmetic_mul_test() ->
     assert_has_error(
         xdp_u64(<<"    let x = true * true">>),
-        bool_in_arithmetic).
+        bool_in_arithmetic
+    ).
 
 %% Comparison with bool is OK (== / !=)
 bool_comparison_ok_test() ->
-    assert_ok(xdp(<<"    let x = true\n    if x == false do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(
+            <<"    let x = true\n    if x == false do\n      return :drop\n    end\n    return :pass">>
+        )
+    ).
 
 %% Logical ops with bool are OK
 bool_logical_ok_test() ->
@@ -374,10 +440,14 @@ bool_logical_ok_test() ->
 
 wider_scalar_symmetry_test() ->
     %% u16 + i16 and i16 + u16 should both compile (mixed → unsigned)
-    assert_ok(xdp_u64(<<"    let a : u16 = 1\n    let b : i16 = 2\n    let c = a + b\n    return c">>)).
+    assert_ok(
+        xdp_u64(<<"    let a : u16 = 1\n    let b : i16 = 2\n    let c = a + b\n    return c">>)
+    ).
 
 wider_scalar_symmetry_reverse_test() ->
-    assert_ok(xdp_u64(<<"    let a : i16 = 1\n    let b : u16 = 2\n    let c = a + b\n    return c">>)).
+    assert_ok(
+        xdp_u64(<<"    let a : i16 = 1\n    let b : u16 = 2\n    let c = a + b\n    return c">>)
+    ).
 
 %%% ===================================================================
 %%% 13. for loop bounds — non-integer
@@ -386,7 +456,8 @@ wider_scalar_symmetry_reverse_test() ->
 for_bounds_not_integer_bool_test() ->
     assert_has_error(
         xdp_u64(<<"    for i in true..10 do\n    end\n    return 0">>),
-        for_bounds_not_integer).
+        for_bounds_not_integer
+    ).
 
 %%% ===================================================================
 %%% 14. Context field validation
@@ -401,7 +472,8 @@ valid_ctx_field_data_end_test() ->
 unknown_ctx_field_test() ->
     assert_has_error(
         xdp_u64(<<"    let d = ctx.nonexistent_field\n    return d">>),
-        unknown_ctx_field).
+        unknown_ctx_field
+    ).
 
 %%% ===================================================================
 %%% 15. Map operations
@@ -533,14 +605,17 @@ valid_struct_field_arithmetic_test() ->
 %%% ===================================================================
 
 valid_match_literals_test() ->
-    assert_ok(xdp(<<
-        "    let x = 2\n"
-        "    match x do\n"
-        "      1 -> return :drop\n"
-        "      2 -> return :pass\n"
-        "      _ -> return :pass\n"
-        "    end\n"
-        "    return :pass">>)).
+    assert_ok(
+        xdp(<<
+            "    let x = 2\n"
+            "    match x do\n"
+            "      1 -> return :drop\n"
+            "      2 -> return :pass\n"
+            "      _ -> return :pass\n"
+            "    end\n"
+            "    return :pass"
+        >>)
+    ).
 
 %%% ===================================================================
 %%% 21. Multiple errors accumulate
@@ -550,7 +625,8 @@ multiple_errors_test() ->
     Src = xdp(<<
         "    let a = unknown1\n"
         "    let b = unknown2\n"
-        "    return :bogus">>),
+        "    return :bogus"
+    >>),
     case typecheck(Src) of
         {errors, Errs} ->
             %% Should have at least 3 errors: 2 undefined_var + 1 invalid_action
@@ -580,18 +656,21 @@ valid_const_test() ->
 %%% ===================================================================
 
 valid_break_continue_test() ->
-    assert_ok(xdp_u64(<<
-        "    let sum = 0\n"
-        "    for i in 0..10 do\n"
-        "      if i == 5 do\n"
-        "        break\n"
-        "      end\n"
-        "      if i == 3 do\n"
-        "        continue\n"
-        "      end\n"
-        "      sum = sum + i\n"
-        "    end\n"
-        "    return sum">>)).
+    assert_ok(
+        xdp_u64(<<
+            "    let sum = 0\n"
+            "    for i in 0..10 do\n"
+            "      if i == 5 do\n"
+            "        break\n"
+            "      end\n"
+            "      if i == 3 do\n"
+            "        continue\n"
+            "      end\n"
+            "      sum = sum + i\n"
+            "    end\n"
+            "    return sum"
+        >>)
+    ).
 
 %%% ===================================================================
 %%% 24. Multiple functions
@@ -619,13 +698,21 @@ valid_multi_fn_test() ->
 %%% ===================================================================
 
 logical_and_with_integer_test() ->
-    assert_ok(xdp(<<"    let x = 1\n    let y = 2\n    if x && y do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(
+            <<"    let x = 1\n    let y = 2\n    if x && y do\n      return :drop\n    end\n    return :pass">>
+        )
+    ).
 
 logical_or_with_integer_test() ->
-    assert_ok(xdp(<<"    let x = 0\n    if x || 1 do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(<<"    let x = 0\n    if x || 1 do\n      return :drop\n    end\n    return :pass">>)
+    ).
 
 logical_not_with_integer_test() ->
-    assert_ok(xdp(<<"    let x = 0\n    if !x do\n      return :drop\n    end\n    return :pass">>)).
+    assert_ok(
+        xdp(<<"    let x = 0\n    if !x do\n      return :drop\n    end\n    return :pass">>)
+    ).
 
 %%% ===================================================================
 %%% 26. Logical operators reject non-scalar types
@@ -745,7 +832,8 @@ valid_typed_params_test() ->
 for_var_scoped_test() ->
     assert_has_error(
         xdp_u64(<<"    for i in 0..10 do\n    end\n    return i">>),
-        undefined_var).
+        undefined_var
+    ).
 
 %%% ===================================================================
 %%% 33. Action type compatible with scalar in assignment
@@ -753,10 +841,13 @@ for_var_scoped_test() ->
 
 action_scalar_compatible_test() ->
     %% action and scalar should be compatible (types_compatible returns true)
-    assert_ok(xdp(<<
-        "    let x = 1\n"
-        "    x = :pass\n"
-        "    return :pass">>)).
+    assert_ok(
+        xdp(<<
+            "    let x = 1\n"
+            "    x = :pass\n"
+            "    return :pass"
+        >>)
+    ).
 
 %%% ===================================================================
 %%% 34. Negation rejects non-scalar

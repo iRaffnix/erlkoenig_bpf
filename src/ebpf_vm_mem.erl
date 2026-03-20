@@ -1,26 +1,45 @@
-%% @doc Memory subsystem for the BPF VM.
 %%
-%% Supports region-based addressing:
-%%   ctx:       0x10000000
-%%   packet:    0x20000000
-%%   stack:     0x30000000
-%%   map_value: 0x40000000
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_vm_mem).
+-moduledoc """
+Memory subsystem for the BPF VM.
+
+Supports region-based addressing:
+  ctx:       0x10000000
+  packet:    0x20000000
+  stack:     0x30000000
+  map_value: 0x40000000
+""".
 
 -include("ebpf_vm.hrl").
 
 -export([read/4, write/5, resolve_region/2]).
 
-%% @doc Read Size bytes at Addr from memory regions.
--spec read(#{atom() => binary()}, integer(), 1|2|4|8, binary()) ->
+-doc "Read Size bytes at Addr from memory regions.".
+-spec read(#{atom() => binary()}, integer(), 1 | 2 | 4 | 8, binary()) ->
     {ok, integer()} | {error, oob}.
 read(Memory, Addr, Size, Stack) ->
     case resolve_region(Addr, Stack) of
         {ok, Region, Offset} ->
-            Bin = case Region of
-                stack -> Stack;
-                _ -> maps:get(Region, Memory, <<>>)
-            end,
+            Bin =
+                case Region of
+                    stack -> Stack;
+                    _ -> maps:get(Region, Memory, <<>>)
+                end,
             BitSize = Size * 8,
             if
                 Offset >= 0, Offset + Size =< byte_size(Bin) ->
@@ -33,16 +52,17 @@ read(Memory, Addr, Size, Stack) ->
             Err
     end.
 
-%% @doc Write Size bytes at Addr. Returns updated {Memory, Stack}.
--spec write(#{atom() => binary()}, integer(), 1|2|4|8, integer(), binary()) ->
+-doc "Write Size bytes at Addr. Returns updated {Memory, Stack}.".
+-spec write(#{atom() => binary()}, integer(), 1 | 2 | 4 | 8, integer(), binary()) ->
     {ok, #{atom() => binary()}, binary()} | {error, oob}.
 write(Memory, Addr, Size, Value, Stack) ->
     case resolve_region(Addr, Stack) of
         {ok, Region, Offset} ->
-            Bin = case Region of
-                stack -> Stack;
-                _ -> maps:get(Region, Memory, <<>>)
-            end,
+            Bin =
+                case Region of
+                    stack -> Stack;
+                    _ -> maps:get(Region, Memory, <<>>)
+                end,
             BitSize = Size * 8,
             if
                 Offset >= 0, Offset + Size =< byte_size(Bin) ->
@@ -59,20 +79,28 @@ write(Memory, Addr, Size, Value, Stack) ->
             Err
     end.
 
-%% @doc Resolve a virtual address to {Region, Offset}.
+-doc "Resolve a virtual address to {Region, Offset}.".
 -spec resolve_region(integer(), binary()) ->
     {ok, atom(), non_neg_integer()} | {error, bad_addr}.
-resolve_region(Addr, Stack) when Addr >= ?VM_STACK_BASE,
-                                  Addr < ?VM_STACK_BASE + byte_size(Stack) ->
+resolve_region(Addr, Stack) when
+    Addr >= ?VM_STACK_BASE,
+    Addr < ?VM_STACK_BASE + byte_size(Stack)
+->
     {ok, stack, Addr - ?VM_STACK_BASE};
-resolve_region(Addr, _Stack) when Addr >= ?VM_CTX_BASE,
-                                   Addr < ?VM_CTX_BASE + 16#10000000 ->
+resolve_region(Addr, _Stack) when
+    Addr >= ?VM_CTX_BASE,
+    Addr < ?VM_CTX_BASE + 16#10000000
+->
     {ok, ctx, Addr - ?VM_CTX_BASE};
-resolve_region(Addr, _Stack) when Addr >= ?VM_PACKET_BASE,
-                                   Addr < ?VM_PACKET_BASE + 16#10000000 ->
+resolve_region(Addr, _Stack) when
+    Addr >= ?VM_PACKET_BASE,
+    Addr < ?VM_PACKET_BASE + 16#10000000
+->
     {ok, packet, Addr - ?VM_PACKET_BASE};
-resolve_region(Addr, _Stack) when Addr >= ?VM_MAP_VALUE_BASE,
-                                   Addr < ?VM_MAP_VALUE_BASE + 16#10000000 ->
+resolve_region(Addr, _Stack) when
+    Addr >= ?VM_MAP_VALUE_BASE,
+    Addr < ?VM_MAP_VALUE_BASE + 16#10000000
+->
     {ok, map_value, Addr - ?VM_MAP_VALUE_BASE};
 resolve_region(_Addr, _Stack) ->
     {error, bad_addr}.

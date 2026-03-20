@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_regalloc_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebpf_ir.hrl").
 
 %%% ===================================================================
@@ -11,22 +28,50 @@
 %% pressure since all intervals overlap.
 make_linear_program(VRegCount) ->
     %% Create instructions: mov {v,1} = 1, mov {v,2} = 2, ...
-    Instrs = [#ir_instr{op = mov, dst = {v, I},
-                        args = [I],
-                        type = {scalar, u64}, loc = undefined}
-              || I <- lists:seq(1, VRegCount)],
+    Instrs = [
+        #ir_instr{
+            op = mov,
+            dst = {v, I},
+            args = [I],
+            type = {scalar, u64},
+            loc = undefined
+        }
+     || I <- lists:seq(1, VRegCount)
+    ],
     %% Sum chain: add v_ret = sum of all vregs (forces all to be live until exit)
-    SumInstrs = case VRegCount of
-        0 ->
-            [#ir_instr{op = mov, dst = v_ret, args = [0],
-                       type = {scalar, u64}, loc = undefined}];
-        _ ->
-            [#ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                       type = {scalar, u64}, loc = undefined}] ++
-            [#ir_instr{op = add, dst = v_ret, args = [v_ret, {v, I}],
-                       type = {scalar, u64}, loc = undefined}
-             || I <- lists:seq(2, VRegCount)]
-    end,
+    SumInstrs =
+        case VRegCount of
+            0 ->
+                [
+                    #ir_instr{
+                        op = mov,
+                        dst = v_ret,
+                        args = [0],
+                        type = {scalar, u64},
+                        loc = undefined
+                    }
+                ];
+            _ ->
+                [
+                    #ir_instr{
+                        op = mov,
+                        dst = v_ret,
+                        args = [{v, 1}],
+                        type = {scalar, u64},
+                        loc = undefined
+                    }
+                ] ++
+                    [
+                        #ir_instr{
+                            op = add,
+                            dst = v_ret,
+                            args = [v_ret, {v, I}],
+                            type = {scalar, u64},
+                            loc = undefined
+                        }
+                     || I <- lists:seq(2, VRegCount)
+                    ]
+        end,
     Block = #ir_block{
         label = entry,
         instrs = Instrs ++ SumInstrs,
@@ -43,21 +88,49 @@ make_linear_program(VRegCount) ->
 %% Build a program with ctx + fp + N user variables (forces pre-coloring).
 make_precolor_program(VRegCount) ->
     %% Use v_ctx and v_fp alongside user vregs
-    Instrs = [#ir_instr{op = mov, dst = {v, I},
+    Instrs = [
+        #ir_instr{
+            op = mov,
+            dst = {v, I},
+            args = [v_ctx],
+            type = {scalar, u64},
+            loc = undefined
+        }
+     || I <- lists:seq(1, VRegCount)
+    ],
+    SumInstrs =
+        case VRegCount of
+            0 ->
+                [
+                    #ir_instr{
+                        op = mov,
+                        dst = v_ret,
                         args = [v_ctx],
-                        type = {scalar, u64}, loc = undefined}
-              || I <- lists:seq(1, VRegCount)],
-    SumInstrs = case VRegCount of
-        0 ->
-            [#ir_instr{op = mov, dst = v_ret, args = [v_ctx],
-                       type = {scalar, u64}, loc = undefined}];
-        _ ->
-            [#ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                       type = {scalar, u64}, loc = undefined}] ++
-            [#ir_instr{op = add, dst = v_ret, args = [v_ret, {v, I}],
-                       type = {scalar, u64}, loc = undefined}
-             || I <- lists:seq(2, VRegCount)]
-    end,
+                        type = {scalar, u64},
+                        loc = undefined
+                    }
+                ];
+            _ ->
+                [
+                    #ir_instr{
+                        op = mov,
+                        dst = v_ret,
+                        args = [{v, 1}],
+                        type = {scalar, u64},
+                        loc = undefined
+                    }
+                ] ++
+                    [
+                        #ir_instr{
+                            op = add,
+                            dst = v_ret,
+                            args = [v_ret, {v, I}],
+                            type = {scalar, u64},
+                            loc = undefined
+                        }
+                     || I <- lists:seq(2, VRegCount)
+                    ]
+        end,
     Block = #ir_block{
         label = entry,
         instrs = Instrs ++ SumInstrs,
@@ -75,17 +148,33 @@ make_precolor_program(VRegCount) ->
 make_loop_program() ->
     %% Before loop: define {v,1} and {v,2}
     EntryInstrs = [
-        #ir_instr{op = mov, dst = {v, 1}, args = [10],
-                  type = {scalar, u64}, loc = undefined},
-        #ir_instr{op = mov, dst = {v, 2}, args = [20],
-                  type = {scalar, u64}, loc = undefined},
-        #ir_instr{op = mov, dst = {v, 3}, args = [5],
-                  type = {scalar, u64}, loc = undefined}
+        #ir_instr{
+            op = mov,
+            dst = {v, 1},
+            args = [10],
+            type = {scalar, u64},
+            loc = undefined
+        },
+        #ir_instr{
+            op = mov,
+            dst = {v, 2},
+            args = [20],
+            type = {scalar, u64},
+            loc = undefined
+        },
+        #ir_instr{
+            op = mov,
+            dst = {v, 3},
+            args = [5],
+            type = {scalar, u64},
+            loc = undefined
+        }
     ],
     EntryBlock = #ir_block{
         label = entry,
         instrs = EntryInstrs,
-        term = {br, {label, 1}}  %% header
+        %% header
+        term = {br, {label, 1}}
     },
     %% Header: check {v,3} != 0
     HeaderBlock = #ir_block{
@@ -95,22 +184,38 @@ make_loop_program() ->
     },
     %% Body: use {v,1} and {v,2}, decrement {v,3}
     BodyInstrs = [
-        #ir_instr{op = add, dst = {v, 1}, args = [{v, 1}, {v, 2}],
-                  type = {scalar, u64}, loc = undefined},
-        #ir_instr{op = sub, dst = {v, 3}, args = [{v, 3}, 1],
-                  type = {scalar, u64}, loc = undefined}
+        #ir_instr{
+            op = add,
+            dst = {v, 1},
+            args = [{v, 1}, {v, 2}],
+            type = {scalar, u64},
+            loc = undefined
+        },
+        #ir_instr{
+            op = sub,
+            dst = {v, 3},
+            args = [{v, 3}, 1],
+            type = {scalar, u64},
+            loc = undefined
+        }
     ],
     BodyBlock = #ir_block{
         label = {label, 2},
         instrs = BodyInstrs,
-        term = {br, {label, 1}}  %% back-edge
+        %% back-edge
+        term = {br, {label, 1}}
     },
     %% Exit: return {v,1}
     ExitBlock = #ir_block{
         label = {label, 3},
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -131,14 +236,34 @@ make_loop_program() ->
 make_sequential_program(VRegCount) ->
     %% Each variable is defined, used once, then never again.
     %% This should reuse registers aggressively.
-    Instrs = lists:flatmap(fun(I) ->
-        [#ir_instr{op = mov, dst = {v, I}, args = [I],
-                   type = {scalar, u64}, loc = undefined},
-         #ir_instr{op = add, dst = v_ret, args = [v_ret, {v, I}],
-                   type = {scalar, u64}, loc = undefined}]
-    end, lists:seq(1, VRegCount)),
-    InitInstr = #ir_instr{op = mov, dst = v_ret, args = [0],
-                          type = {scalar, u64}, loc = undefined},
+    Instrs = lists:flatmap(
+        fun(I) ->
+            [
+                #ir_instr{
+                    op = mov,
+                    dst = {v, I},
+                    args = [I],
+                    type = {scalar, u64},
+                    loc = undefined
+                },
+                #ir_instr{
+                    op = add,
+                    dst = v_ret,
+                    args = [v_ret, {v, I}],
+                    type = {scalar, u64},
+                    loc = undefined
+                }
+            ]
+        end,
+        lists:seq(1, VRegCount)
+    ),
+    InitInstr = #ir_instr{
+        op = mov,
+        dst = v_ret,
+        args = [0],
+        type = {scalar, u64},
+        loc = undefined
+    },
     Block = #ir_block{
         label = entry,
         instrs = [InitInstr | Instrs],
@@ -198,10 +323,20 @@ precolor_fp_r10_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = add, dst = {v, 1}, args = [v_fp, -8],
-                      type = {ptr, stack}, loc = undefined},
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = add,
+                dst = {v, 1},
+                args = [v_fp, -8],
+                type = {ptr, stack},
+                loc = undefined
+            },
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -261,10 +396,13 @@ spill_offsets_are_negative_multiples_of_8_test() ->
     Prog = make_linear_program(12),
     {_Assign, Spills} = ebpf_regalloc:allocate(Prog),
     ?assert(maps:size(Spills) > 0),
-    maps:foreach(fun(_VReg, Offset) ->
-        ?assert(Offset < 0),
-        ?assertEqual(0, Offset rem 8)
-    end, Spills).
+    maps:foreach(
+        fun(_VReg, Offset) ->
+            ?assert(Offset < 0),
+            ?assertEqual(0, Offset rem 8)
+        end,
+        Spills
+    ).
 
 spill_offsets_are_unique_test() ->
     Prog = make_linear_program(12),
@@ -319,11 +457,14 @@ many_overlapping_variables_test() ->
     {Assign, Spills} = ebpf_regalloc:allocate(Prog),
     %% Total assigned + spilled must cover all vregs
     TotalVRegs = [{v, I} || I <- lists:seq(1, 15)] ++ [v_ret],
-    lists:foreach(fun(VR) ->
-        InAssign = maps:is_key(VR, Assign),
-        InSpill = maps:is_key(VR, Spills),
-        ?assert(InAssign orelse InSpill)
-    end, TotalVRegs).
+    lists:foreach(
+        fun(VR) ->
+            InAssign = maps:is_key(VR, Assign),
+            InSpill = maps:is_key(VR, Spills),
+            ?assert(InAssign orelse InSpill)
+        end,
+        TotalVRegs
+    ).
 
 %%% ===================================================================
 %%% Edge cases
@@ -334,8 +475,13 @@ only_precolored_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [v_ctx],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [v_ctx],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -356,16 +502,26 @@ two_block_disjoint_test() ->
     Block1 = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = mov, dst = {v, 1}, args = [42],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = {v, 1},
+                args = [42],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {br, {label, 1}}
     },
     Block2 = #ir_block{
         label = {label, 1},
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -386,26 +542,46 @@ diamond_cfg_test() ->
     Entry = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = mov, dst = {v, 1}, args = [1],
-                      type = {scalar, u64}, loc = undefined},
-            #ir_instr{op = mov, dst = {v, 2}, args = [2],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = {v, 1},
+                args = [1],
+                type = {scalar, u64},
+                loc = undefined
+            },
+            #ir_instr{
+                op = mov,
+                dst = {v, 2},
+                args = [2],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {cond_br, {v, 1}, {label, 1}, {label, 2}}
     },
     TrueBlock = #ir_block{
         label = {label, 1},
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
     FalseBlock = #ir_block{
         label = {label, 2},
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 2}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 2}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -434,9 +610,12 @@ stress_20_vars_test() ->
     {Assign, Spills} = ebpf_regalloc:allocate(Prog),
     %% Must not crash and must account for all vregs
     TotalVRegs = [{v, I} || I <- lists:seq(1, 20)] ++ [v_ret],
-    lists:foreach(fun(VR) ->
-        ?assert(maps:is_key(VR, Assign) orelse maps:is_key(VR, Spills))
-    end, TotalVRegs),
+    lists:foreach(
+        fun(VR) ->
+            ?assert(maps:is_key(VR, Assign) orelse maps:is_key(VR, Spills))
+        end,
+        TotalVRegs
+    ),
     %% Among non-spilled, all assigned registers must be distinct
     NonSpilled = maps:without(maps:keys(Spills), Assign),
     Regs = maps:values(NonSpilled),

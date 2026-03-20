@@ -1,8 +1,26 @@
-%% @doc Minimal HTTP server for the BPF visual debugger.
 %%
-%% Zero dependencies — uses gen_tcp directly. Serves the single-page
-%% debugger frontend and provides a JSON API for compile/step/run/reset.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_debugger_web).
+-moduledoc """
+Minimal HTTP server for the BPF visual debugger.
+
+Zero dependencies -- uses gen_tcp directly. Serves the single-page
+debugger frontend and provides a JSON API for compile/step/run/reset.
+""".
 
 -export([start/0, start/1, stop/0]).
 
@@ -10,19 +28,21 @@
 
 %% Session state stored in ETS
 -record(session, {
-    id          :: binary(),
-    debug_state :: term(),     %% #debug_state{} from ebpf_vm_debug
-    source      :: binary(),
-    source_map  :: map(),
-    disasm      :: list(),
-    map_specs   :: list(),
-    created     :: integer()   %% erlang:system_time(second)
+    id :: binary(),
+    %% #debug_state{} from ebpf_vm_debug
+    debug_state :: term(),
+    source :: binary(),
+    source_map :: map(),
+    disasm :: list(),
+    map_specs :: list(),
+    %% erlang:system_time(second)
+    created :: integer()
 }).
 
-%% @doc Start the debugger web server on port 8080.
+-doc "Start the debugger web server on port 8080.".
 start() -> start(?DEFAULT_PORT).
 
-%% @doc Start the debugger web server on a given port.
+-doc "Start the debugger web server on a given port.".
 -spec start(pos_integer()) -> {ok, pid()}.
 start(Port) ->
     _ = ets:new(debugger_sessions, [named_table, public, {keypos, #session.id}]),
@@ -36,7 +56,7 @@ start(Port) ->
     io:format("    http://localhost:~B~n~n", [Port]),
     {ok, Pid}.
 
-%% @doc Stop the debugger.
+-doc "Stop the debugger.".
 stop() ->
     case whereis(ebpf_debugger) of
         undefined -> ok;
@@ -65,8 +85,13 @@ ets_owner_loop() ->
 %%% ===================================================================
 
 listen(Port) ->
-    {ok, LSock} = gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true},
-                                         {packet, http_bin}, {backlog, 32}]),
+    {ok, LSock} = gen_tcp:listen(Port, [
+        binary,
+        {active, false},
+        {reuseaddr, true},
+        {packet, http_bin},
+        {backlog, 32}
+    ]),
     accept_loop(LSock).
 
 accept_loop(LSock) ->
@@ -84,13 +109,15 @@ handle_connection(Sock) ->
             Headers = recv_headers(Sock, []),
             ContentLength = proplists:get_value('Content-Length', Headers, <<"0">>),
             CL = binary_to_integer(ContentLength),
-            Body = case CL > 0 of
-                true ->
-                    ok = inet:setopts(Sock, [{packet, raw}]),
-                    {ok, B} = gen_tcp:recv(Sock, CL, 5000),
-                    B;
-                false -> <<>>
-            end,
+            Body =
+                case CL > 0 of
+                    true ->
+                        ok = inet:setopts(Sock, [{packet, raw}]),
+                        {ok, B} = gen_tcp:recv(Sock, CL, 5000),
+                        B;
+                    false ->
+                        <<>>
+                end,
             {Status, RespHeaders, RespBody} = route(Method, Path, Body),
             ok = send_response(Sock, Status, RespHeaders, RespBody),
             gen_tcp:close(Sock);
@@ -110,8 +137,11 @@ recv_headers(Sock, Acc) ->
 
 send_response(Sock, Status, Headers, Body) ->
     StatusLine = io_lib:format("HTTP/1.1 ~B ~s\r\n", [Status, status_text(Status)]),
-    AllHeaders = [{<<"Content-Length">>, integer_to_binary(byte_size(Body))},
-                  {<<"Connection">>, <<"close">>} | Headers],
+    AllHeaders = [
+        {<<"Content-Length">>, integer_to_binary(byte_size(Body))},
+        {<<"Connection">>, <<"close">>}
+        | Headers
+    ],
     HeaderLines = [[K, <<": ">>, V, <<"\r\n">>] || {K, V} <- AllHeaders],
     ok = inet:setopts(Sock, [{packet, raw}]),
     ok = gen_tcp:send(Sock, [StatusLine, HeaderLines, <<"\r\n">>, Body]).
@@ -147,8 +177,7 @@ route('GET', <<"/api/example/", Name/binary>>, _Body) ->
 route('POST', <<"/api/check">>, Body) ->
     api_check(Body);
 route(_, _, _) ->
-    {404, [{<<"Content-Type">>, <<"application/json">>}],
-     encode_json(#{error => <<"not found">>})}.
+    {404, [{<<"Content-Type">>, <<"application/json">>}], encode_json(#{error => <<"not found">>})}.
 
 %%% ===================================================================
 %%% API handlers
@@ -159,28 +188,37 @@ api_compile(Body) ->
         Params = decode_json(Body),
         Source = maps:get(<<"source">>, Params),
         Language = maps:get(<<"language">>, Params, <<"ebl">>),
-        CompileResult = case Language of
-            <<"elixir">> -> compile_elixir_debug(Source);
-            _ -> ebl_compile:compile_debug(Source)
-        end,
+        CompileResult =
+            case Language of
+                <<"elixir">> -> compile_elixir_debug(Source);
+                _ -> ebl_compile:compile_debug(Source)
+            end,
         case CompileResult of
             {ok, #{binary := Bin, ir := IRBlocks}} ->
                 Disasm = ebpf_disasm:disassemble_explained(Bin),
-                DisasmList = [#{pc => PC, text => Text,
-                                explain_short => maps:get(short, Expl),
-                                explain_detail => maps:get(detail, Expl),
-                                explain_category => maps:get(category, Expl)}
-                              || {PC, Text, Expl} <- Disasm],
+                DisasmList = [
+                    #{
+                        pc => PC,
+                        text => Text,
+                        explain_short => maps:get(short, Expl),
+                        explain_detail => maps:get(detail, Expl),
+                        explain_category => maps:get(category, Expl)
+                    }
+                 || {PC, Text, Expl} <- Disasm
+                ],
                 MapSpecs = extract_map_specs(Source),
-                json_ok(#{instructions => DisasmList,
-                          insn_count => length(DisasmList),
-                          ir => format_ir_blocks(IRBlocks),
-                          map_specs => format_map_specs(MapSpecs)});
+                json_ok(#{
+                    instructions => DisasmList,
+                    insn_count => length(DisasmList),
+                    ir => format_ir_blocks(IRBlocks),
+                    map_specs => format_map_specs(MapSpecs)
+                });
             {error, Err} ->
                 json_ok(format_compile_error(Err))
         end
-    catch C:E:St ->
-        json_error(io_lib:format("~p:~p ~p", [C, E, St]))
+    catch
+        C:E:St ->
+            json_error(io_lib:format("~p:~p ~p", [C, E, St]))
     end.
 
 api_init(Body) ->
@@ -190,10 +228,11 @@ api_init(Body) ->
         Language = maps:get(<<"language">>, Params, <<"ebl">>),
         PacketHex = maps:get(<<"packet_hex">>, Params, <<>>),
         Packet = hex_to_bin(PacketHex),
-        CompileResult = case Language of
-            <<"elixir">> -> compile_elixir_debug(Source);
-            _ -> ebl_compile:compile_debug(Source)
-        end,
+        CompileResult =
+            case Language of
+                <<"elixir">> -> compile_elixir_debug(Source);
+                _ -> ebl_compile:compile_debug(Source)
+            end,
         case CompileResult of
             {ok, #{binary := Bin, ir := IRBlocks} = DebugInfo} ->
                 MapSpecs = extract_map_specs(Source),
@@ -202,11 +241,16 @@ api_init(Body) ->
                 Owner = whereis(ebpf_debugger_ets_owner),
                 {ok, DS} = ebpf_vm_debug:init(Bin, Ctx, MapSpecs, Owner),
                 Disasm = ebpf_disasm:disassemble_explained(Bin),
-                DisasmList = [#{pc => PC, text => Text,
-                                explain_short => maps:get(short, Expl),
-                                explain_detail => maps:get(detail, Expl),
-                                explain_category => maps:get(category, Expl)}
-                              || {PC, Text, Expl} <- Disasm],
+                DisasmList = [
+                    #{
+                        pc => PC,
+                        text => Text,
+                        explain_short => maps:get(short, Expl),
+                        explain_detail => maps:get(detail, Expl),
+                        explain_category => maps:get(category, Expl)
+                    }
+                 || {PC, Text, Expl} <- Disasm
+                ],
                 SessionId = gen_session_id(),
                 Session = #session{
                     id = SessionId,
@@ -219,17 +263,20 @@ api_init(Body) ->
                 },
                 ets:insert(debugger_sessions, Session),
                 State = ebpf_vm_debug:get_state(DS),
-                json_ok(#{session_id => SessionId,
-                          instructions => DisasmList,
-                          ir => format_ir_blocks(IRBlocks),
-                          state => State,
-                          source_map => format_source_map(SourceMap),
-                          map_specs => format_map_specs(MapSpecs)});
+                json_ok(#{
+                    session_id => SessionId,
+                    instructions => DisasmList,
+                    ir => format_ir_blocks(IRBlocks),
+                    state => State,
+                    source_map => format_source_map(SourceMap),
+                    map_specs => format_map_specs(MapSpecs)
+                });
             {error, Err} ->
                 json_ok(format_compile_error(Err))
         end
-    catch C:E:St ->
-        json_error(io_lib:format("~p:~p ~p", [C, E, St]))
+    catch
+        C:E:St ->
+            json_error(io_lib:format("~p:~p ~p", [C, E, St]))
     end.
 
 api_step(Body) ->
@@ -277,8 +324,11 @@ api_examples() ->
     ExDir = "examples",
     case file:list_dir(ExDir) of
         {ok, Files} ->
-            EblFiles = lists:sort([list_to_binary(F) || F <- Files,
-                                    filename:extension(F) =:= ".ebl"]),
+            EblFiles = lists:sort([
+                list_to_binary(F)
+             || F <- Files,
+                filename:extension(F) =:= ".ebl"
+            ]),
             json_ok(#{examples => EblFiles});
         {error, _} ->
             json_ok(#{examples => []})
@@ -299,44 +349,55 @@ api_check(Body) ->
     try
         Params = decode_json(Body),
         Source = maps:get(<<"source">>, Params),
-        case ebl_lexer:tokenize(Source) of
-            {ok, Tokens} ->
-                case ebl_parser:parse(Tokens) of
-                    {ok, AST} ->
-                        case ebl_typecheck:check(AST) of
-                            {ok, _} ->
-                                json_ok(#{status => <<"ok">>, errors => []});
-                            {error, Errs} ->
-                                ErrList = [ebl_error_format:format_json(E) || E <- Errs],
-                                json_ok(#{status => <<"error">>, phase => <<"typecheck">>,
-                                          errors => ErrList})
-                        end;
-                    {error, Err} ->
-                        json_ok(#{status => <<"error">>, phase => <<"parse">>,
-                                  errors => [ebl_error_format:format_json(Err)]})
-                end;
+        maybe
+            {ok, Tokens} ?= ebl_lexer:tokenize(Source),
+            {ok, AST} ?= ebl_parser:parse(Tokens),
+            {ok, _} ?= ebl_typecheck:check(AST),
+            json_ok(#{status => <<"ok">>, errors => []})
+        else
+            {error, Errs} when is_list(Errs) ->
+                ErrList = [ebl_error_format:format_json(E) || E <- Errs],
+                json_ok(#{
+                    status => <<"error">>,
+                    phase => <<"typecheck">>,
+                    errors => ErrList
+                });
             {error, Err} ->
-                json_ok(#{status => <<"error">>, phase => <<"lex">>,
-                          errors => [ebl_error_format:format_json(Err)]})
+                %% Lex or parse error (single error, not a list)
+                json_ok(#{
+                    status => <<"error">>,
+                    phase => <<"compile">>,
+                    errors => [ebl_error_format:format_json(Err)]
+                })
         end
-    catch C:E:St ->
-        json_error(io_lib:format("~p:~p ~p", [C, E, St]))
+    catch
+        C:E:St ->
+            json_error(io_lib:format("~p:~p ~p", [C, E, St]))
     end.
 
 %%% ===================================================================
 %%% Elixir DSL compilation
 %%% ===================================================================
 
-%% @doc Compile Elixir DSL source to debug artifacts.
+%% Compile Elixir DSL source to debug artifacts.
 %% Delegates to the Elixir DSL module which evaluates the code and
 %% compiles through the standard pipeline.
+-dialyzer({nowarn_function, compile_elixir_debug/1}).
 compile_elixir_debug(Source) ->
-    try 'Elixir.ErlkoenigEbpfDsl':compile_debug_string(Source)
-    catch C:E ->
-        Msg = iolist_to_binary(io_lib:format("~p:~p", [C, E])),
-        {error, #{formatted => Msg,
-                  json => #{message => Msg,
-                            line => 0, col => 0, phase => <<"elixir">>}}}
+    try
+        'Elixir.ErlkoenigEbpfDsl':compile_debug_string(Source)
+    catch
+        C:E ->
+            Msg = iolist_to_binary(io_lib:format("~p:~p", [C, E])),
+            {error, #{
+                formatted => Msg,
+                json => #{
+                    message => Msg,
+                    line => 0,
+                    col => 0,
+                    phase => <<"elixir">>
+                }
+            }}
     end.
 
 %%% ===================================================================
@@ -351,8 +412,9 @@ with_session(Body, Fun) ->
             [Session] -> Fun(Session);
             [] -> json_ok(#{error => <<"session not found">>})
         end
-    catch C:E:St ->
-        json_error(io_lib:format("~p:~p ~p", [C, E, St]))
+    catch
+        C:E:St ->
+            json_error(io_lib:format("~p:~p ~p", [C, E, St]))
     end.
 
 gen_session_id() ->
@@ -379,125 +441,61 @@ serve_static(File) ->
 content_type(File) ->
     case filename:extension(File) of
         ".html" -> <<"text/html; charset=utf-8">>;
-        ".css"  -> <<"text/css">>;
-        ".js"   -> <<"application/javascript">>;
+        ".css" -> <<"text/css">>;
+        ".js" -> <<"application/javascript">>;
         ".json" -> <<"application/json">>;
-        ".svg"  -> <<"image/svg+xml">>;
-        _       -> <<"application/octet-stream">>
+        ".svg" -> <<"image/svg+xml">>;
+        _ -> <<"application/octet-stream">>
     end.
 
 %%% ===================================================================
-%%% JSON encoding/decoding (minimal, no deps)
+%%% JSON encoding/decoding — delegates to OTP 28 stdlib json module
 %%% ===================================================================
 
-encode_json(Map) when is_map(Map) ->
-    Pairs = maps:to_list(Map),
-    Encoded = lists:join(<<",">>, [encode_pair(K, V) || {K, V} <- Pairs]),
-    iolist_to_binary([<<"{">>, Encoded, <<"}">>]);
-encode_json(List) when is_list(List) ->
-    Items = lists:join(<<",">>, [encode_json(I) || I <- List]),
-    iolist_to_binary([<<"[">>, Items, <<"]">>]);
-encode_json(Bin) when is_binary(Bin) ->
-    iolist_to_binary([<<"\"">>, json_escape(Bin), <<"\"">>]);
-encode_json(Atom) when is_atom(Atom) ->
-    case Atom of
-        true -> <<"true">>;
-        false -> <<"false">>;
-        null -> <<"null">>;
-        undefined -> <<"null">>;
-        _ -> encode_json(atom_to_binary(Atom, utf8))
-    end;
-encode_json(Int) when is_integer(Int) ->
-    integer_to_binary(Int);
-encode_json(Float) when is_float(Float) ->
-    float_to_binary(Float, [{decimals, 6}, compact]).
+encode_json(Term) ->
+    iolist_to_binary(json:encode(prepare_for_json(Term))).
 
-encode_pair(K, V) ->
-    Key = case is_atom(K) of true -> atom_to_binary(K, utf8); false -> K end,
-    iolist_to_binary([<<"\"">>, json_escape(Key), <<"\":">>, encode_json(V)]).
-
-json_escape(Bin) ->
-    json_escape(Bin, <<>>).
-json_escape(<<>>, Acc) -> Acc;
-json_escape(<<$", Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, $\\, $">>);
-json_escape(<<$\\, Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, $\\, $\\>>);
-json_escape(<<$\n, Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, $\\, $n>>);
-json_escape(<<$\r, Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, $\\, $r>>);
-json_escape(<<$\t, Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, $\\, $t>>);
-json_escape(<<C, Rest/binary>>, Acc) when C < 32 ->
-    Hex = io_lib:format("\\u~4.16.0B", [C]),
-    json_escape(Rest, <<Acc/binary, (iolist_to_binary(Hex))/binary>>);
-json_escape(<<C, Rest/binary>>, Acc) -> json_escape(Rest, <<Acc/binary, C>>).
-
-%% Minimal JSON decoder — handles the subset we need.
 decode_json(Bin) ->
-    {Val, _Rest} = decode_value(skip_ws(Bin)),
-    Val.
+    json:decode(Bin).
 
-decode_value(<<$", Rest/binary>>) ->
-    decode_string(Rest, <<>>);
-decode_value(<<${, Rest/binary>>) ->
-    decode_object(skip_ws(Rest), #{});
-decode_value(<<$[, Rest/binary>>) ->
-    decode_array(skip_ws(Rest), []);
-decode_value(<<"true", Rest/binary>>) -> {true, Rest};
-decode_value(<<"false", Rest/binary>>) -> {false, Rest};
-decode_value(<<"null", Rest/binary>>) -> {null, Rest};
-decode_value(<<C, _/binary>> = Bin) when C =:= $- orelse (C >= $0 andalso C =< $9) ->
-    decode_number(Bin).
-
-decode_string(<<$", Rest/binary>>, Acc) -> {Acc, Rest};
-decode_string(<<$\\, $", Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $">>);
-decode_string(<<$\\, $\\, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $\\>>);
-decode_string(<<$\\, $n, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $\n>>);
-decode_string(<<$\\, $r, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $\r>>);
-decode_string(<<$\\, $t, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $\t>>);
-decode_string(<<$\\, $/, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, $/>>);
-decode_string(<<C, Rest/binary>>, Acc) -> decode_string(Rest, <<Acc/binary, C>>).
-
-decode_object(<<$}, Rest/binary>>, Acc) -> {Acc, Rest};
-decode_object(<<$,, Rest/binary>>, Acc) -> decode_object(skip_ws(Rest), Acc);
-decode_object(<<$", Rest/binary>>, Acc) ->
-    {Key, Rest2} = decode_string(Rest, <<>>),
-    <<$:, Rest3/binary>> = skip_ws(Rest2),
-    {Val, Rest4} = decode_value(skip_ws(Rest3)),
-    decode_object(skip_ws(Rest4), Acc#{Key => Val}).
-
-decode_array(<<$], Rest/binary>>, Acc) -> {lists:reverse(Acc), Rest};
-decode_array(<<$,, Rest/binary>>, Acc) -> decode_array(skip_ws(Rest), Acc);
-decode_array(Bin, Acc) ->
-    {Val, Rest} = decode_value(Bin),
-    decode_array(skip_ws(Rest), [Val | Acc]).
-
-decode_number(Bin) ->
-    {NumStr, Rest} = take_number_chars(Bin, <<>>),
-    Num = case binary:match(NumStr, <<".">>) of
-        nomatch -> binary_to_integer(NumStr);
-        _ -> binary_to_float(NumStr)
-    end,
-    {Num, Rest}.
-
-take_number_chars(<<C, Rest/binary>>, Acc)
-  when C >= $0, C =< $9; C =:= $.; C =:= $-; C =:= $+; C =:= $e; C =:= $E ->
-    take_number_chars(Rest, <<Acc/binary, C>>);
-take_number_chars(Rest, Acc) -> {Acc, Rest}.
-
-skip_ws(<<C, Rest/binary>>) when C =:= $\s; C =:= $\t; C =:= $\n; C =:= $\r ->
-    skip_ws(Rest);
-skip_ws(Bin) -> Bin.
+%% Prepare Erlang terms for json:encode/1 (atoms → binaries, undefined → null).
+prepare_for_json(M) when is_map(M) ->
+    maps:fold(
+        fun(K, V, Acc) ->
+            Key =
+                case is_atom(K) of
+                    true -> atom_to_binary(K, utf8);
+                    false -> K
+                end,
+            Acc#{Key => prepare_for_json(V)}
+        end,
+        #{},
+        M
+    );
+prepare_for_json(L) when is_list(L) ->
+    [prepare_for_json(E) || E <- L];
+prepare_for_json(undefined) ->
+    null;
+prepare_for_json(A) when is_atom(A) ->
+    A;
+prepare_for_json(V) ->
+    V.
 
 %%% ===================================================================
 %%% JSON response helpers
 %%% ===================================================================
 
 json_ok(Data) ->
-    {200, [{<<"Content-Type">>, <<"application/json">>},
-           {<<"Access-Control-Allow-Origin">>, <<"*">>}],
-     encode_json(Data)}.
+    {200,
+        [
+            {<<"Content-Type">>, <<"application/json">>},
+            {<<"Access-Control-Allow-Origin">>, <<"*">>}
+        ],
+        encode_json(Data)}.
 
 json_error(Msg) ->
     {500, [{<<"Content-Type">>, <<"application/json">>}],
-     encode_json(#{error => iolist_to_binary(Msg)})}.
+        encode_json(#{error => iolist_to_binary(Msg)})}.
 
 %%% ===================================================================
 %%% Map spec extraction from source
@@ -505,17 +503,21 @@ json_error(Msg) ->
 
 extract_map_specs(Source) ->
     Lines = binary:split(Source, <<"\n">>, [global]),
-    lists:filtermap(fun(Line) ->
-        Trimmed = string:trim(Line),
-        case binary:match(Trimmed, <<"map :">>) of
-            {0, _} -> parse_map_line(Trimmed);
-            _ ->
-                case binary:match(Trimmed, <<"map :">>) of
-                    nomatch -> false;
-                    _ -> parse_map_line(Trimmed)
-                end
-        end
-    end, Lines).
+    lists:filtermap(
+        fun(Line) ->
+            Trimmed = string:trim(Line),
+            case binary:match(Trimmed, <<"map :">>) of
+                {0, _} ->
+                    parse_map_line(Trimmed);
+                _ ->
+                    case binary:match(Trimmed, <<"map :">>) of
+                        nomatch -> false;
+                        _ -> parse_map_line(Trimmed)
+                    end
+            end
+        end,
+        Lines
+    ).
 
 parse_map_line(Line) ->
     try
@@ -525,8 +527,9 @@ parse_map_line(Line) ->
         VS = type_size(extract_field(Line, <<"value:">>)),
         ME = extract_int_field(Line, <<"max_entries:">>),
         {true, {hash, KS, VS, ME}}
-    catch _:_ ->
-        false
+    catch
+        _:_ ->
+            false
     end.
 
 extract_field(Line, Prefix) ->
@@ -537,7 +540,8 @@ extract_field(Line, Prefix) ->
                 [Field, _] -> string:trim(Field);
                 [Field] -> string:trim(Field)
             end;
-        _ -> error(not_found)
+        _ ->
+            error(not_found)
     end.
 
 extract_int_field(Line, Prefix) ->
@@ -555,39 +559,54 @@ type_size(<<"i64">>) -> 8;
 type_size(_) -> 4.
 
 format_ir_blocks(Blocks) ->
-    lists:map(fun(#{label := Label, instrs := Instrs, term := Term}) ->
-        #{label => Label,
-          instrs => Instrs,
-          term => Term}
-    end, Blocks).
+    lists:map(
+        fun(#{label := Label, instrs := Instrs, term := Term}) ->
+            #{
+                label => Label,
+                instrs => Instrs,
+                term => Term
+            }
+        end,
+        Blocks
+    ).
 
 format_map_specs(Specs) ->
-    lists:map(fun({Type, KS, VS, ME}) ->
-        #{type => Type, key_size => KS, val_size => VS, max_entries => ME}
-    end, Specs).
+    lists:map(
+        fun({Type, KS, VS, ME}) ->
+            #{type => Type, key_size => KS, val_size => VS, max_entries => ME}
+        end,
+        Specs
+    ).
 
 format_compile_error(#{formatted := Formatted, json := Json}) ->
-    #{error => iolist_to_binary(Formatted),
-      error_detail => Json};
+    #{
+        error => iolist_to_binary(Formatted),
+        error_detail => Json
+    };
 format_compile_error(Err) ->
     #{error => iolist_to_binary(io_lib:format("~p", [Err]))}.
 
 format_source_map(Map) when is_map(Map) ->
-    maps:fold(fun(PC, {L, C}, Acc) ->
-        Acc#{integer_to_binary(PC) => #{line => L, col => C}}
-    end, #{}, Map);
-format_source_map(_) -> #{}.
+    maps:fold(
+        fun(PC, {L, C}, Acc) ->
+            Acc#{integer_to_binary(PC) => #{line => L, col => C}}
+        end,
+        #{},
+        Map
+    ).
 
 %%% ===================================================================
 %%% Hex conversion
 %%% ===================================================================
 
-hex_to_bin(<<>>) -> <<>>;
+hex_to_bin(<<>>) ->
+    <<>>;
 hex_to_bin(HexStr) ->
     Cleaned = binary:replace(HexStr, [<<" ">>, <<"\n">>, <<"\r">>], <<>>, [global]),
     hex_decode(Cleaned, <<>>).
 
-hex_decode(<<>>, Acc) -> Acc;
+hex_decode(<<>>, Acc) ->
+    Acc;
 hex_decode(<<Hi, Lo, Rest/binary>>, Acc) ->
     Byte = (hex_digit(Hi) bsl 4) bor hex_digit(Lo),
     hex_decode(Rest, <<Acc/binary, Byte>>).

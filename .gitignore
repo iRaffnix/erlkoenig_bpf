@@ -25,3 +25,6 @@ third-party/src/
 # EUnit/Rebar
 .eunit/
 .rebar3/
+
+# Internal docs (not for publishing)
+idoc/
