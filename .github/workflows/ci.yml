@@ -67,6 +67,7 @@ jobs:
         with:
           otp-version: '28'
           elixir-version: '1.18'
+          rebar3-version: '3.24'
 
       - name: Compile Erlang (dependency)
         run: rebar3 compile
