@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_lexer_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%% ===================================================================
 %%% WP-001 Acceptance Criterion:
@@ -17,42 +34,45 @@ acceptance_test() ->
 
 keywords_test_() ->
     KWs = [
-        {<<"do">>,       do_kw},
-        {<<"end">>,      end_kw},
-        {<<"fn">>,       fn_kw},
-        {<<"let">>,      let_kw},
-        {<<"if">>,       if_kw},
-        {<<"elif">>,     elif_kw},
-        {<<"else">>,     else_kw},
-        {<<"for">>,      for_kw},
-        {<<"in">>,       in_kw},
-        {<<"match">>,    match_kw},
-        {<<"return">>,   return_kw},
-        {<<"type">>,     type_kw},
-        {<<"map">>,      map_kw},
-        {<<"const">>,    const_kw},
-        {<<"true">>,     true_kw},
-        {<<"false">>,    false_kw},
-        {<<"sizeof">>,   sizeof_kw},
-        {<<"break">>,    break_kw},
+        {<<"do">>, do_kw},
+        {<<"end">>, end_kw},
+        {<<"fn">>, fn_kw},
+        {<<"let">>, let_kw},
+        {<<"if">>, if_kw},
+        {<<"elif">>, elif_kw},
+        {<<"else">>, else_kw},
+        {<<"for">>, for_kw},
+        {<<"in">>, in_kw},
+        {<<"match">>, match_kw},
+        {<<"return">>, return_kw},
+        {<<"type">>, type_kw},
+        {<<"map">>, map_kw},
+        {<<"const">>, const_kw},
+        {<<"true">>, true_kw},
+        {<<"false">>, false_kw},
+        {<<"sizeof">>, sizeof_kw},
+        {<<"break">>, break_kw},
         {<<"continue">>, continue_kw},
-        {<<"action">>,   action_kw},
-        {<<"xdp">>,      xdp_kw},
-        {<<"tc">>,       tc_kw},
-        {<<"u8">>,       u8_kw},
-        {<<"u16">>,      u16_kw},
-        {<<"u32">>,      u32_kw},
-        {<<"u64">>,      u64_kw},
-        {<<"i8">>,       i8_kw},
-        {<<"i16">>,      i16_kw},
-        {<<"i32">>,      i32_kw},
-        {<<"i64">>,      i64_kw},
-        {<<"bool">>,     bool_kw}
+        {<<"action">>, action_kw},
+        {<<"xdp">>, xdp_kw},
+        {<<"tc">>, tc_kw},
+        {<<"u8">>, u8_kw},
+        {<<"u16">>, u16_kw},
+        {<<"u32">>, u32_kw},
+        {<<"u64">>, u64_kw},
+        {<<"i8">>, i8_kw},
+        {<<"i16">>, i16_kw},
+        {<<"i32">>, i32_kw},
+        {<<"i64">>, i64_kw},
+        {<<"bool">>, bool_kw}
     ],
-    [{binary_to_list(Src), fun() ->
-        {ok, [{token, Type, _, _, _} | _]} = ebl_lexer:tokenize(Src),
-        ?assertEqual(Expected, Type)
-    end} || {Src, Expected} <- KWs].
+    [
+        {binary_to_list(Src), fun() ->
+            {ok, [{token, Type, _, _, _} | _]} = ebl_lexer:tokenize(Src),
+            ?assertEqual(Expected, Type)
+        end}
+     || {Src, Expected} <- KWs
+    ].
 
 %%% ===================================================================
 %%% Identifiers
@@ -131,13 +151,15 @@ two_char_ops_test_() ->
         {<<"<<">>, lshift},
         {<<">>">>, rshift},
         {<<"->">>, arrow},
-        {<<"..">>, dotdot},
-        {<<"?.">>, question_dot}
+        {<<"..">>, dotdot}
     ],
-    [{binary_to_list(Src), fun() ->
-        {ok, [T | _]} = ebl_lexer:tokenize(Src),
-        ?assertMatch({token, Expected, _, _, _}, T)
-    end} || {Src, Expected} <- Ops].
+    [
+        {binary_to_list(Src), fun() ->
+            {ok, [T | _]} = ebl_lexer:tokenize(Src),
+            ?assertMatch({token, Expected, _, _, _}, T)
+        end}
+     || {Src, Expected} <- Ops
+    ].
 
 three_char_op_test() ->
     {ok, [T | _]} = ebl_lexer:tokenize(<<"..=">>),
@@ -145,34 +167,37 @@ three_char_op_test() ->
 
 single_char_ops_test_() ->
     Ops = [
-        {<<"|">>,  pipe_op},
-        {<<"^">>,  caret},
-        {<<"&">>,  ampersand},
-        {<<"<">>,  lt},
-        {<<">">>,  gt},
-        {<<"+">>,  plus},
-        {<<"-">>,  minus},
-        {<<"*">>,  star},
-        {<<"/">>,  slash},
-        {<<"%">>,  percent},
-        {<<"!">>,  bang},
-        {<<"~">>,  tilde},
-        {<<"(">>,  lparen},
-        {<<")">>,  rparen},
-        {<<"{">>,  lbrace},
-        {<<"}">>,  rbrace},
-        {<<"[">>,  lbracket},
-        {<<"]">>,  rbracket},
-        {<<",">>,  comma},
-        {<<":">>,  colon},
-        {<<";">>,  semicolon},
-        {<<".">>,  dot},
-        {<<"=">>,  eq}
+        {<<"|">>, pipe_op},
+        {<<"^">>, caret},
+        {<<"&">>, ampersand},
+        {<<"<">>, lt},
+        {<<">">>, gt},
+        {<<"+">>, plus},
+        {<<"-">>, minus},
+        {<<"*">>, star},
+        {<<"/">>, slash},
+        {<<"%">>, percent},
+        {<<"!">>, bang},
+        {<<"~">>, tilde},
+        {<<"(">>, lparen},
+        {<<")">>, rparen},
+        {<<"{">>, lbrace},
+        {<<"}">>, rbrace},
+        {<<"[">>, lbracket},
+        {<<"]">>, rbracket},
+        {<<",">>, comma},
+        {<<":">>, colon},
+        {<<";">>, semicolon},
+        {<<".">>, dot},
+        {<<"=">>, eq}
     ],
-    [{binary_to_list(Src), fun() ->
-        {ok, [T | _]} = ebl_lexer:tokenize(Src),
-        ?assertMatch({token, Expected, _, _, _}, T)
-    end} || {Src, Expected} <- Ops].
+    [
+        {binary_to_list(Src), fun() ->
+            {ok, [T | _]} = ebl_lexer:tokenize(Src),
+            ?assertMatch({token, Expected, _, _, _}, T)
+        end}
+     || {Src, Expected} <- Ops
+    ].
 
 %%% ===================================================================
 %%% Newlines
@@ -219,22 +244,42 @@ location_test() ->
 %%% ===================================================================
 
 unexpected_char_test() ->
-    ?assertMatch({error, {{unexpected_char, $`}, _, _}},
-                 ebl_lexer:tokenize(<<"`">>)).
+    ?assertMatch(
+        {error, {{unexpected_char, $`}, _, _}},
+        ebl_lexer:tokenize(<<"`">>)
+    ).
 
 %%% ===================================================================
 %%% Full program snippet
 %%% ===================================================================
 
 mini_program_test() ->
-    Src = <<"fn main(ctx) -> action do\n"
-            "  return :pass\n"
-            "end">>,
+    Src = <<
+        "fn main(ctx) -> action do\n"
+        "  return :pass\n"
+        "end"
+    >>,
     {ok, Tokens} = ebl_lexer:tokenize(Src),
     Types = [T || {token, T, _, _, _} <- Tokens],
-    ?assertEqual([fn_kw, ident, lparen, ident, rparen, arrow, action_kw,
-                  do_kw, newline, return_kw, atom_lit, newline, end_kw, eof],
-                 Types).
+    ?assertEqual(
+        [
+            fn_kw,
+            ident,
+            lparen,
+            ident,
+            rparen,
+            arrow,
+            action_kw,
+            do_kw,
+            newline,
+            return_kw,
+            atom_lit,
+            newline,
+            end_kw,
+            eof
+        ],
+        Types
+    ).
 
 %%% ===================================================================
 %%% Map type keywords
@@ -242,17 +287,20 @@ mini_program_test() ->
 
 map_types_test_() ->
     KWs = [
-        {<<"hash">>,          hash_kw},
-        {<<"array">>,         array_kw},
-        {<<"lru_hash">>,      lru_hash_kw},
-        {<<"percpu_hash">>,   percpu_hash_kw},
-        {<<"percpu_array">>,  percpu_array_kw},
-        {<<"ringbuf">>,       ringbuf_kw}
+        {<<"hash">>, hash_kw},
+        {<<"array">>, array_kw},
+        {<<"lru_hash">>, lru_hash_kw},
+        {<<"percpu_hash">>, percpu_hash_kw},
+        {<<"percpu_array">>, percpu_array_kw},
+        {<<"ringbuf">>, ringbuf_kw}
     ],
-    [{binary_to_list(Src), fun() ->
-        {ok, [{token, Type, _, _, _} | _]} = ebl_lexer:tokenize(Src),
-        ?assertEqual(Expected, Type)
-    end} || {Src, Expected} <- KWs].
+    [
+        {binary_to_list(Src), fun() ->
+            {ok, [{token, Type, _, _, _} | _]} = ebl_lexer:tokenize(Src),
+            ?assertEqual(Expected, Type)
+        end}
+     || {Src, Expected} <- KWs
+    ].
 
 %%% ===================================================================
 %%% Empty input

@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_realworld_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%% ===================================================================
 %%% Real-world XDP program tests for examples 15-18.
@@ -14,32 +31,40 @@
 
 syn_flood_pass_normal_tcp_test() ->
     %% Normal TCP SYN → count=1, under threshold → PASS (2)
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               flags => [syn]}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2},
+        flags => [syn]
+    }),
     MapSpecs = [{hash, 4, 8, 65536}],
     assert_ebl_xdp("examples/15_syn_flood_protect.ebl", Pkt, MapSpecs, 2).
 
 syn_flood_pass_syn_ack_test() ->
     %% SYN+ACK → legitimate response, always PASS
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               flags => [syn, ack]}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2},
+        flags => [syn, ack]
+    }),
     MapSpecs = [{hash, 4, 8, 65536}],
     assert_ebl_xdp("examples/15_syn_flood_protect.ebl", Pkt, MapSpecs, 2).
 
 syn_flood_pass_ack_only_test() ->
     %% ACK only → no SYN bit → PASS
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               flags => [ack]}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2},
+        flags => [ack]
+    }),
     MapSpecs = [{hash, 4, 8, 65536}],
     assert_ebl_xdp("examples/15_syn_flood_protect.ebl", Pkt, MapSpecs, 2).
 
 syn_flood_pass_udp_test() ->
     %% UDP → not TCP → PASS
-    Pkt = ebpf_test_pkt:udp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:udp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 65536}],
     assert_ebl_xdp("examples/15_syn_flood_protect.ebl", Pkt, MapSpecs, 2).
 
@@ -61,17 +86,21 @@ syn_flood_pass_short_pkt_test() ->
 
 firewall_drop_unknown_tcp_port_test() ->
     %% TCP to port 9999 (not in allowed_ports map) → DROP (1)
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               dst_port => 9999}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2},
+        dst_port => 9999
+    }),
     MapSpecs = [{hash, 4, 8, 1024}],
     assert_ebl_xdp("examples/16_port_firewall.ebl", Pkt, MapSpecs, 1).
 
 firewall_drop_unknown_udp_port_test() ->
     %% UDP to port 5555 → not allowed → DROP
-    Pkt = ebpf_test_pkt:udp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               dst_port => 5555}),
+    Pkt = ebpf_test_pkt:udp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2},
+        dst_port => 5555
+    }),
     MapSpecs = [{hash, 4, 8, 1024}],
     assert_ebl_xdp("examples/16_port_firewall.ebl", Pkt, MapSpecs, 1).
 
@@ -83,8 +112,10 @@ firewall_pass_arp_test() ->
 
 firewall_pass_icmp_test() ->
     %% ICMP → not TCP/UDP → PASS
-    Pkt = ebpf_test_pkt:icmp(#{src_ip => {10, 0, 0, 1},
-                                dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:icmp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 1024}],
     assert_ebl_xdp("examples/16_port_firewall.ebl", Pkt, MapSpecs, 2).
 
@@ -99,8 +130,10 @@ firewall_pass_short_pkt_test() ->
 
 ttl_pass_normal_ttl_test() ->
     %% Normal TTL (64) → PASS
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 16384}],
     assert_ebl_xdp("examples/17_ttl_filter.ebl", Pkt, MapSpecs, 2).
 
@@ -121,22 +154,28 @@ ttl_pass_short_pkt_test() ->
 
 icmp_rl_pass_first_ping_test() ->
     %% First Echo Request → count=1, under threshold → PASS
-    Pkt = ebpf_test_pkt:icmp(#{src_ip => {10, 0, 0, 1},
-                                dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:icmp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 32768}],
     assert_ebl_xdp("examples/18_icmp_rate_limiter.ebl", Pkt, MapSpecs, 2).
 
 icmp_rl_pass_tcp_test() ->
     %% TCP → not ICMP → PASS
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 32768}],
     assert_ebl_xdp("examples/18_icmp_rate_limiter.ebl", Pkt, MapSpecs, 2).
 
 icmp_rl_pass_udp_test() ->
     %% UDP → not ICMP → PASS
-    Pkt = ebpf_test_pkt:udp(#{src_ip => {10, 0, 0, 1},
-                               dst_ip => {10, 0, 0, 2}}),
+    Pkt = ebpf_test_pkt:udp(#{
+        src_ip => {10, 0, 0, 1},
+        dst_ip => {10, 0, 0, 2}
+    }),
     MapSpecs = [{hash, 4, 8, 32768}],
     assert_ebl_xdp("examples/18_icmp_rate_limiter.ebl", Pkt, MapSpecs, 2).
 
@@ -156,33 +195,57 @@ icmp_rl_pass_short_pkt_test() ->
 %%% ===================================================================
 
 xval_syn_flood_syn_test() ->
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {192, 168, 1, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               flags => [syn]}),
-    assert_ebl_xdp_xval("examples/15_syn_flood_protect.ebl", Pkt,
-                         [{hash, 4, 8, 65536}], 2).
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {192, 168, 1, 1},
+        dst_ip => {10, 0, 0, 2},
+        flags => [syn]
+    }),
+    assert_ebl_xdp_xval(
+        "examples/15_syn_flood_protect.ebl",
+        Pkt,
+        [{hash, 4, 8, 65536}],
+        2
+    ).
 
 xval_syn_flood_ack_test() ->
-    Pkt = ebpf_test_pkt:tcp(#{src_ip => {192, 168, 1, 1},
-                               dst_ip => {10, 0, 0, 2},
-                               flags => [ack]}),
-    assert_ebl_xdp_xval("examples/15_syn_flood_protect.ebl", Pkt,
-                         [{hash, 4, 8, 65536}], 2).
+    Pkt = ebpf_test_pkt:tcp(#{
+        src_ip => {192, 168, 1, 1},
+        dst_ip => {10, 0, 0, 2},
+        flags => [ack]
+    }),
+    assert_ebl_xdp_xval(
+        "examples/15_syn_flood_protect.ebl",
+        Pkt,
+        [{hash, 4, 8, 65536}],
+        2
+    ).
 
 xval_firewall_drop_test() ->
     Pkt = ebpf_test_pkt:tcp(#{dst_port => 9999}),
-    assert_ebl_xdp_xval("examples/16_port_firewall.ebl", Pkt,
-                         [{hash, 4, 8, 1024}], 1).
+    assert_ebl_xdp_xval(
+        "examples/16_port_firewall.ebl",
+        Pkt,
+        [{hash, 4, 8, 1024}],
+        1
+    ).
 
 xval_ttl_normal_test() ->
     Pkt = ebpf_test_pkt:tcp(#{}),
-    assert_ebl_xdp_xval("examples/17_ttl_filter.ebl", Pkt,
-                         [{hash, 4, 8, 16384}], 2).
+    assert_ebl_xdp_xval(
+        "examples/17_ttl_filter.ebl",
+        Pkt,
+        [{hash, 4, 8, 16384}],
+        2
+    ).
 
 xval_icmp_rl_first_test() ->
     Pkt = ebpf_test_pkt:icmp(#{}),
-    assert_ebl_xdp_xval("examples/18_icmp_rate_limiter.ebl", Pkt,
-                         [{hash, 4, 8, 32768}], 2).
+    assert_ebl_xdp_xval(
+        "examples/18_icmp_rate_limiter.ebl",
+        Pkt,
+        [{hash, 4, 8, 32768}],
+        2
+    ).
 
 %%% ===================================================================
 %%% Helpers (identical to ebl_packet_test)
@@ -195,10 +258,11 @@ compile(Path) ->
 assert_ebl_xdp(Path, Pkt, MapSpecs, Expected) ->
     Bin = compile(Path),
     Ctx = ebpf_test_pkt:xdp_ctx(Pkt),
-    Opts = case MapSpecs of
-        [] -> #{};
-        _ -> #{maps => MapSpecs}
-    end,
+    Opts =
+        case MapSpecs of
+            [] -> #{};
+            _ -> #{maps => MapSpecs}
+        end,
     {ok, Result} = ebpf_vm:run(Bin, Ctx, Opts),
     ?assertEqual(Expected, Result).
 
@@ -206,10 +270,11 @@ assert_ebl_xdp_xval(Path, Pkt, MapSpecs, Expected) ->
     Bin = compile(Path),
     %% Erlang VM
     Ctx = ebpf_test_pkt:xdp_ctx(Pkt),
-    Opts = case MapSpecs of
-        [] -> #{};
-        _ -> #{maps => MapSpecs}
-    end,
+    Opts =
+        case MapSpecs of
+            [] -> #{};
+            _ -> #{maps => MapSpecs}
+        end,
     {ok, ErlResult} = ebpf_vm:run(Bin, Ctx, Opts),
     ?assertEqual(Expected, ErlResult),
     %% uBPF cross-validation

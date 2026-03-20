@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_endian_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%% ===================================================================
 %%% Endian instruction encoding / decoding
@@ -126,12 +143,16 @@ vm_le32_truncates_test() ->
 make_xdp_ctx(PktBin) ->
     PktBase = 16#20000000,
     PktLen = byte_size(PktBin),
-    Ctx = <<PktBase:32/little,
-            (PktBase + PktLen):32/little,
-            0:32/little,     %% data_meta
-            0:32/little,     %% ingress_ifindex
-            0:32/little,     %% rx_queue_index
-            0:32/little>>,   %% egress_ifindex
+    Ctx =
+        <<PktBase:32/little, (PktBase + PktLen):32/little,
+            %% data_meta
+            0:32/little,
+            %% ingress_ifindex
+            0:32/little,
+            %% rx_queue_index
+            0:32/little,
+            %% egress_ifindex
+            0:32/little>>,
     #{ctx => Ctx, packet => PktBin}.
 
 vm_read_u8_from_packet_test() ->
@@ -140,9 +161,12 @@ vm_read_u8_from_packet_test() ->
     CtxMap = make_xdp_ctx(Pkt),
     %% Load ctx.data (offset 0, u32) into R1, then ldxb R0, [R1 + 1]
     Prog = ebpf_insn:assemble([
-        ebpf_insn:mov64_reg(6, 1),   %% save ctx
-        ebpf_insn:ldxw(1, 6, 0),      %% R1 = ctx.data (packet base)
-        ebpf_insn:ldxb(0, 1, 1),      %% R0 = *(u8*)(R1 + 1) = 0xBB
+        %% save ctx
+        ebpf_insn:mov64_reg(6, 1),
+        %% R1 = ctx.data (packet base)
+        ebpf_insn:ldxw(1, 6, 0),
+        %% R0 = *(u8*)(R1 + 1) = 0xBB
+        ebpf_insn:ldxb(0, 1, 1),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
@@ -151,15 +175,22 @@ vm_read_u8_from_packet_test() ->
 vm_read_u16_from_packet_test() ->
     %% Ethernet header: dst(6) + src(6) + ethertype(2)
     %% Ethertype at offset 12: 0x0800 (IP) stored in network byte order
-    EthHdr = <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF,  %% dst MAC
-               16#00, 16#11, 16#22, 16#33, 16#44, 16#55,  %% src MAC
-               16#08, 16#00>>,                              %% ethertype 0x0800 (big-endian)
+
+    %% dst MAC
+    EthHdr =
+        <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF,
+            %% src MAC
+            16#00, 16#11, 16#22, 16#33, 16#44, 16#55,
+            %% ethertype 0x0800 (big-endian)
+            16#08, 16#00>>,
     CtxMap = make_xdp_ctx(EthHdr),
     %% Load ctx.data, ldxh at offset 12
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
-        ebpf_insn:ldxw(1, 6, 0),      %% R1 = ctx.data
-        ebpf_insn:ldxh(0, 1, 12),     %% R0 = *(u16*)(R1 + 12)
+        %% R1 = ctx.data
+        ebpf_insn:ldxw(1, 6, 0),
+        %% R0 = *(u16*)(R1 + 12)
+        ebpf_insn:ldxh(0, 1, 12),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
@@ -168,15 +199,16 @@ vm_read_u16_from_packet_test() ->
 
 vm_read_u16_be_from_packet_test() ->
     %% Same as above, but with be16 to get network byte order value
-    EthHdr = <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF,
-               16#00, 16#11, 16#22, 16#33, 16#44, 16#55,
-               16#08, 16#00>>,
+    EthHdr =
+        <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#00, 16#11, 16#22, 16#33, 16#44, 16#55, 16#08,
+            16#00>>,
     CtxMap = make_xdp_ctx(EthHdr),
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
         ebpf_insn:ldxw(1, 6, 0),
         ebpf_insn:ldxh(0, 1, 12),
-        ebpf_insn:be16(0),            %% swap to big-endian: 0x0008 → 0x0800
+        %% swap to big-endian: 0x0008 → 0x0800
+        ebpf_insn:be16(0),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
@@ -190,8 +222,10 @@ vm_read_u32_from_packet_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
         ebpf_insn:ldxw(1, 6, 0),
-        ebpf_insn:ldxw(0, 1, 26),     %% src_ip at offset 26
-        ebpf_insn:be32(0),            %% network → host order
+        %% src_ip at offset 26
+        ebpf_insn:ldxw(0, 1, 26),
+        %% network → host order
+        ebpf_insn:be32(0),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
@@ -205,11 +239,13 @@ vm_read_protocol_from_ip_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
         ebpf_insn:ldxw(1, 6, 0),
-        ebpf_insn:ldxb(0, 1, 23),     %% protocol at offset 23
+        %% protocol at offset 23
+        ebpf_insn:ldxb(0, 1, 23),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
-    ?assertEqual(6, Result).  %% TCP
+    %% TCP
+    ?assertEqual(6, Result).
 
 %%% ===================================================================
 %%% Bounds check pattern (data + N > data_end)
@@ -217,22 +253,31 @@ vm_read_protocol_from_ip_test() ->
 
 vm_bounds_check_pass_test() ->
     %% Short packet (10 bytes) — bounds check for 34 bytes should fail → return 2 (XDP_PASS)
-    Pkt = <<0:80>>,  %% 10 bytes
+
+    %% 10 bytes
+    Pkt = <<0:80>>,
     CtxMap = make_xdp_ctx(Pkt),
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
-        ebpf_insn:ldxw(2, 6, 0),      %% R2 = ctx.data
-        ebpf_insn:ldxw(3, 6, 4),      %% R3 = ctx.data_end
+        %% R2 = ctx.data
+        ebpf_insn:ldxw(2, 6, 0),
+        %% R3 = ctx.data_end
+        ebpf_insn:ldxw(3, 6, 4),
         ebpf_insn:mov64_reg(4, 2),
-        ebpf_insn:add64_imm(4, 34),   %% R4 = data + 34
-        ebpf_insn:jgt_reg(4, 3, 2),   %% if data+34 > data_end → skip to pass+exit
-        ebpf_insn:mov64_imm(0, 1),    %% XDP_DROP (not reached for short packet)
+        %% R4 = data + 34
+        ebpf_insn:add64_imm(4, 34),
+        %% if data+34 > data_end → skip to pass+exit
+        ebpf_insn:jgt_reg(4, 3, 2),
+        %% XDP_DROP (not reached for short packet)
+        ebpf_insn:mov64_imm(0, 1),
         ebpf_insn:exit_insn(),
-        ebpf_insn:mov64_imm(0, 2),    %% XDP_PASS
+        %% XDP_PASS
+        ebpf_insn:mov64_imm(0, 2),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
-    ?assertEqual(2, Result).  %% XDP_PASS (bounds check triggered)
+    %% XDP_PASS (bounds check triggered)
+    ?assertEqual(2, Result).
 
 vm_bounds_check_ok_test() ->
     %% Full-size packet — bounds check should pass → proceed to "drop"
@@ -244,14 +289,18 @@ vm_bounds_check_ok_test() ->
         ebpf_insn:ldxw(3, 6, 4),
         ebpf_insn:mov64_reg(4, 2),
         ebpf_insn:add64_imm(4, 34),
-        ebpf_insn:jgt_reg(4, 3, 2),   %% if too short → skip to pass+exit
-        ebpf_insn:mov64_imm(0, 1),    %% XDP_DROP (packet large enough)
+        %% if too short → skip to pass+exit
+        ebpf_insn:jgt_reg(4, 3, 2),
+        %% XDP_DROP (packet large enough)
+        ebpf_insn:mov64_imm(0, 1),
         ebpf_insn:exit_insn(),
-        ebpf_insn:mov64_imm(0, 2),    %% XDP_PASS
+        %% XDP_PASS
+        ebpf_insn:mov64_imm(0, 2),
         ebpf_insn:exit_insn()
     ]),
     {ok, Result} = ebpf_vm:run(Prog, CtxMap),
-    ?assertEqual(1, Result).  %% XDP_DROP (bounds check passed)
+    %% XDP_DROP (bounds check passed)
+    ?assertEqual(1, Result).
 
 %%% ===================================================================
 %%% Endian double-swap roundtrip
@@ -286,21 +335,25 @@ make_ip_packet({S1, S2, S3, S4}, {D1, D2, D3, D4}) ->
     %% Ethernet header (14 bytes)
     EthDst = <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF>>,
     EthSrc = <<16#00, 16#11, 16#22, 16#33, 16#44, 16#55>>,
-    EthType = <<16#08, 16#00>>,  %% IPv4
+    %% IPv4
+    EthType = <<16#08, 16#00>>,
     %% IPv4 header (20 bytes, minimal)
-    IHL_Ver = 16#45,  %% version=4, IHL=5 (20 bytes)
+
+    %% version=4, IHL=5 (20 bytes)
+    IHL_Ver = 16#45,
     DSCP = 0,
-    TotalLen = <<0, 40>>,  %% 20 IP + 20 TCP (big-endian)
+    %% 20 IP + 20 TCP (big-endian)
+    TotalLen = <<0, 40>>,
     Ident = <<0, 0>>,
     Flags_Frag = <<0, 0>>,
     TTL = 64,
-    Protocol = 6,  %% TCP
+    %% TCP
+    Protocol = 6,
     Checksum = <<0, 0>>,
     SrcIP = <<S1, S2, S3, S4>>,
     DstIP = <<D1, D2, D3, D4>>,
     %% TCP header stub (20 bytes, minimal)
     TcpHdr = <<0:160>>,
-    <<EthDst/binary, EthSrc/binary, EthType/binary,
-      IHL_Ver, DSCP, TotalLen/binary, Ident/binary,
-      Flags_Frag/binary, TTL, Protocol, Checksum/binary,
-      SrcIP/binary, DstIP/binary, TcpHdr/binary>>.
+    <<EthDst/binary, EthSrc/binary, EthType/binary, IHL_Ver, DSCP, TotalLen/binary, Ident/binary,
+        Flags_Frag/binary, TTL, Protocol, Checksum/binary, SrcIP/binary, DstIP/binary,
+        TcpHdr/binary>>.

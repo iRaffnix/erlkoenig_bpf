@@ -15,18 +15,18 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - name: x86_64-glibc
-            runner: ubuntu-latest
-            image: elixir:1.18-otp-27-slim
-            deps: apt-get update && apt-get install -y git make gcc g++ curl
+          - name: x86_64-linux
+            runner: ubuntu-22.04
+            image: hexpm/elixir:1.18.4-erlang-28.4.1-debian-bookworm-20260316-slim
+            deps: apt-get update && apt-get install -y git make gcc g++ curl cmake libelf-dev
           - name: x86_64-musl
-            runner: ubuntu-latest
-            image: hexpm/elixir:1.18.3-erlang-27.3-alpine-3.21.3
-            deps: apk add --no-cache git make gcc g++ musl-dev curl
-          - name: aarch64-glibc
-            runner: ubuntu-24.04-arm
-            image: elixir:1.18-otp-27-slim
-            deps: apt-get update && apt-get install -y git make gcc g++ curl
+            runner: ubuntu-22.04
+            image: hexpm/elixir:1.18.4-erlang-28.4.1-alpine-3.21.6
+            deps: apk add --no-cache git make gcc g++ musl-dev curl cmake elfutils-dev
+          - name: aarch64-linux
+            runner: ubuntu-22.04-arm
+            image: hexpm/elixir:1.18.4-erlang-28.4.1-debian-bookworm-20260316-slim
+            deps: apt-get update && apt-get install -y git make gcc g++ curl cmake libelf-dev
 
     container:
       image: ${{ matrix.target.image }}
@@ -47,18 +47,22 @@ jobs:
           erl -noshell -eval 'io:format("OTP ~s~n", [erlang:system_info(otp_release)]), halt().'
           rebar3 version
 
+      - name: Build uBPF
+        run: ./scripts/build_ubpf.sh
+
       - name: Compile
         run: rebar3 compile
 
       - name: EUnit
         run: rebar3 eunit
 
+      - name: Build release
+        run: rebar3 as prod tar
+
       - name: Collect artifact
         run: |
           mkdir -p out
-          tar czf out/erlkoenig_bpf-${{ github.ref_name }}-${{ matrix.target.name }}.tar.gz \
-            src/ include/ c_src/ dsl/ examples/ scripts/ \
-            rebar.config Makefile LICENSE README.md
+          find _build/prod/rel -name '*.tar.gz' -exec cp {} out/erlkoenig_bpf-${{ github.ref_name }}-${{ matrix.target.name }}.tar.gz \;
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -68,7 +72,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [build]
     steps:
       - uses: actions/checkout@v4

@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_vm_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebpf_vm.hrl").
 
 %%% ===================================================================
@@ -149,18 +166,24 @@ rsh64_test() ->
 
 ja_test() ->
     Prog = ebpf_insn:assemble([
-        ebpf_insn:mov64_imm(0, 1),     %% 0
-        ebpf_insn:ja(1),                 %% 1: skip next
-        ebpf_insn:mov64_imm(0, 99),     %% 2: skipped
-        ebpf_insn:exit_insn()            %% 3
+        %% 0
+        ebpf_insn:mov64_imm(0, 1),
+        %% 1: skip next
+        ebpf_insn:ja(1),
+        %% 2: skipped
+        ebpf_insn:mov64_imm(0, 99),
+        %% 3
+        ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 1}, ebpf_vm:run(Prog, #{})).
 
 jeq_imm_taken_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 10),
-        ebpf_insn:jeq_imm(0, 10, 1),    %% if r0==10 skip 1
-        ebpf_insn:mov64_imm(0, 99),      %% skipped
+        %% if r0==10 skip 1
+        ebpf_insn:jeq_imm(0, 10, 1),
+        %% skipped
+        ebpf_insn:mov64_imm(0, 99),
         ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 10}, ebpf_vm:run(Prog, #{})).
@@ -168,8 +191,10 @@ jeq_imm_taken_test() ->
 jeq_imm_not_taken_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 10),
-        ebpf_insn:jeq_imm(0, 20, 1),    %% not taken
-        ebpf_insn:mov64_imm(0, 42),      %% executed
+        %% not taken
+        ebpf_insn:jeq_imm(0, 20, 1),
+        %% executed
+        ebpf_insn:mov64_imm(0, 42),
         ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 42}, ebpf_vm:run(Prog, #{})).
@@ -177,7 +202,8 @@ jeq_imm_not_taken_test() ->
 jgt_imm_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 10),
-        ebpf_insn:jgt_imm(0, 5, 1),     %% 10 > 5 → taken
+        %% 10 > 5 → taken
+        ebpf_insn:jgt_imm(0, 5, 1),
         ebpf_insn:mov64_imm(0, 99),
         ebpf_insn:exit_insn()
     ]),
@@ -187,7 +213,8 @@ jne_reg_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 1),
         ebpf_insn:mov64_imm(1, 2),
-        ebpf_insn:jne_reg(0, 1, 1),     %% 1 != 2 → taken
+        %% 1 != 2 → taken
+        ebpf_insn:jne_reg(0, 1, 1),
         ebpf_insn:mov64_imm(0, 99),
         ebpf_insn:exit_insn()
     ]),
@@ -199,12 +226,18 @@ jne_reg_test() ->
 
 loop_test() ->
     Prog = ebpf_insn:assemble([
-        ebpf_insn:mov64_imm(0, 0),      %% 0: r0 = 0 (sum)
-        ebpf_insn:mov64_imm(1, 10),     %% 1: r1 = 10 (counter)
-        ebpf_insn:add64_imm(0, 1),      %% 2: r0 += 1
-        ebpf_insn:sub64_imm(1, 1),      %% 3: r1 -= 1
-        ebpf_insn:jgt_imm(1, 0, -3),    %% 4: if r1 > 0, goto 2
-        ebpf_insn:exit_insn()            %% 5
+        %% 0: r0 = 0 (sum)
+        ebpf_insn:mov64_imm(0, 0),
+        %% 1: r1 = 10 (counter)
+        ebpf_insn:mov64_imm(1, 10),
+        %% 2: r0 += 1
+        ebpf_insn:add64_imm(0, 1),
+        %% 3: r1 -= 1
+        ebpf_insn:sub64_imm(1, 1),
+        %% 4: if r1 > 0, goto 2
+        ebpf_insn:jgt_imm(1, 0, -3),
+        %% 5
+        ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 10}, ebpf_vm:run(Prog, #{})).
 
@@ -226,8 +259,10 @@ ld64_imm_test() ->
 stack_store_load_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(1, 42),
-        ebpf_insn:stxw(10, -4, 1),       %% *(r10-4) = r1
-        ebpf_insn:ldxw(0, 10, -4),       %% r0 = *(r10-4)
+        %% *(r10-4) = r1
+        ebpf_insn:stxw(10, -4, 1),
+        %% r0 = *(r10-4)
+        ebpf_insn:ldxw(0, 10, -4),
         ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 42}, ebpf_vm:run(Prog, #{})).
@@ -247,7 +282,8 @@ stack_byte_test() ->
 
 helper_ktime_test() ->
     Prog = ebpf_insn:assemble([
-        ebpf_insn:call(5),               %% ktime_get_ns (helper 5)
+        %% ktime_get_ns (helper 5)
+        ebpf_insn:call(5),
         ebpf_insn:exit_insn()
     ]),
     {ok, Val} = ebpf_vm:run(Prog, #{}),
@@ -275,10 +311,13 @@ unknown_helper_test() ->
 insn_limit_test() ->
     %% Infinite loop — should hit limit
     Prog = ebpf_insn:assemble([
-        ebpf_insn:ja(-1)                 %% loop forever
+        %% loop forever
+        ebpf_insn:ja(-1)
     ]),
-    ?assertEqual({error, insn_limit_exceeded},
-                 ebpf_vm:run(Prog, #{}, #{insn_limit => 100})).
+    ?assertEqual(
+        {error, insn_limit_exceeded},
+        ebpf_vm:run(Prog, #{}, #{insn_limit => 100})
+    ).
 
 %%% ===================================================================
 %%% Decode
@@ -326,14 +365,18 @@ mem_oob_test() ->
 mem_stack_oob_test() ->
     Stack = <<0:(?VM_STACK_SIZE * 8)>>,
     %% Beyond stack region → bad_addr (address outside any known region)
-    ?assertEqual({error, bad_addr},
-                 ebpf_vm_mem:read(#{}, ?VM_STACK_BASE + ?VM_STACK_SIZE, 4, Stack)).
+    ?assertEqual(
+        {error, bad_addr},
+        ebpf_vm_mem:read(#{}, ?VM_STACK_BASE + ?VM_STACK_SIZE, 4, Stack)
+    ).
 
 mem_stack_within_bounds_oob_test() ->
     Stack = <<0:(?VM_STACK_SIZE * 8)>>,
     %% Inside stack region but read would exceed bounds
-    ?assertEqual({error, oob},
-                 ebpf_vm_mem:read(#{}, ?VM_STACK_BASE + ?VM_STACK_SIZE - 2, 4, Stack)).
+    ?assertEqual(
+        {error, oob},
+        ebpf_vm_mem:read(#{}, ?VM_STACK_BASE + ?VM_STACK_SIZE - 2, 4, Stack)
+    ).
 
 %%% ===================================================================
 %%% Maps
@@ -352,9 +395,9 @@ maps_crud_test() ->
 
 maps_full_test() ->
     {_Fd, Tab, Meta} = ebpf_vm_maps:create(hash, 4, 4, 2),
-    ?assertEqual(ok, ebpf_vm_maps:update(Tab, <<1,0,0,0>>, <<1,0,0,0>>, Meta)),
-    ?assertEqual(ok, ebpf_vm_maps:update(Tab, <<2,0,0,0>>, <<2,0,0,0>>, Meta)),
-    ?assertEqual({error, full}, ebpf_vm_maps:update(Tab, <<3,0,0,0>>, <<3,0,0,0>>, Meta)),
+    ?assertEqual(ok, ebpf_vm_maps:update(Tab, <<1, 0, 0, 0>>, <<1, 0, 0, 0>>, Meta)),
+    ?assertEqual(ok, ebpf_vm_maps:update(Tab, <<2, 0, 0, 0>>, <<2, 0, 0, 0>>, Meta)),
+    ?assertEqual({error, full}, ebpf_vm_maps:update(Tab, <<3, 0, 0, 0>>, <<3, 0, 0, 0>>, Meta)),
     ebpf_vm_maps:destroy(Tab).
 
 %%% ===================================================================
@@ -383,7 +426,8 @@ arsh64_sign_extend_test() ->
 lsh32_shift_mask_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 1),
-        ebpf_insn:lsh32_imm(0, 33),   %% 33 band 31 = 1 -> result = 2
+        %% 33 band 31 = 1 -> result = 2
+        ebpf_insn:lsh32_imm(0, 33),
         ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 2}, ebpf_vm:run(Prog, #{})).
@@ -392,7 +436,8 @@ lsh32_shift_mask_test() ->
 rsh32_shift_mask_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_imm(0, 16),
-        ebpf_insn:rsh32_imm(0, 33),   %% 33 band 31 = 1 -> result = 8
+        %% 33 band 31 = 1 -> result = 8
+        ebpf_insn:rsh32_imm(0, 33),
         ebpf_insn:exit_insn()
     ]),
     ?assertEqual({ok, 8}, ebpf_vm:run(Prog, #{})).

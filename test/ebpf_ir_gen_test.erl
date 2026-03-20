@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_ir_gen_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebl_ast.hrl").
 -include("ebpf_ir.hrl").
 
@@ -18,13 +35,15 @@ make_program(ProgType, Stmts) ->
         types = [],
         maps = [],
         consts = [],
-        fns = [#fn_decl{
-            name = <<"main">>,
-            params = [{<<"ctx">>, {prim, u64}}],
-            ret_type = {prim, u64},
-            body = Stmts,
-            loc = {1, 0}
-        }]
+        fns = [
+            #fn_decl{
+                name = <<"main">>,
+                params = [{<<"ctx">>, {prim, u64}}],
+                ret_type = {prim, u64},
+                body = Stmts,
+                loc = {1, 0}
+            }
+        ]
     }.
 
 %% Generate IR and return the ir_program record.
@@ -88,9 +107,13 @@ ctx_param_bound_to_v_ctx_test() ->
     %% ctx is bound to v_ctx, so return must reference v_ctx
     Instrs = block_instrs(entry, IR),
     %% Find mov v_ret, <something> — the source should be v_ctx
-    RetMov = lists:filter(fun(#ir_instr{op = mov, dst = v_ret}) -> true;
-                             (_) -> false
-                          end, Instrs),
+    RetMov = lists:filter(
+        fun
+            (#ir_instr{op = mov, dst = v_ret}) -> true;
+            (_) -> false
+        end,
+        Instrs
+    ),
     ?assert(length(RetMov) > 0),
     [FirstRetMov | _] = RetMov,
     ?assertEqual([v_ctx], FirstRetMov#ir_instr.args).
@@ -128,8 +151,7 @@ add_generates_add_ir_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"a">>}, {integer_lit, 10, {1, 0}}, {1, 0}},
         {let_stmt, {var_pat, <<"b">>}, {integer_lit, 20, {1, 0}}, {1, 0}},
-        {return_stmt, {binop, '+', {var, <<"a">>, {2, 0}},
-                                   {var, <<"b">>, {2, 0}}, {2, 0}}, {2, 0}}
+        {return_stmt, {binop, '+', {var, <<"a">>, {2, 0}}, {var, <<"b">>, {2, 0}}, {2, 0}}, {2, 0}}
     ]),
     IR = gen(AST),
     Ops = block_ops(entry, IR),
@@ -137,8 +159,8 @@ add_generates_add_ir_test() ->
 
 sub_generates_sub_ir_test() ->
     AST = make_program([
-        {return_stmt, {binop, '-', {integer_lit, 50, {1, 0}},
-                                   {integer_lit, 8, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '-', {integer_lit, 50, {1, 0}}, {integer_lit, 8, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     Ops = block_ops(entry, IR),
@@ -146,8 +168,8 @@ sub_generates_sub_ir_test() ->
 
 mul_generates_mul_ir_test() ->
     AST = make_program([
-        {return_stmt, {binop, '*', {integer_lit, 6, {1, 0}},
-                                   {integer_lit, 7, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '*', {integer_lit, 6, {1, 0}}, {integer_lit, 7, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     Ops = block_ops(entry, IR),
@@ -155,8 +177,8 @@ mul_generates_mul_ir_test() ->
 
 div_generates_div_ir_test() ->
     AST = make_program([
-        {return_stmt, {binop, '/', {integer_lit, 42, {1, 0}},
-                                   {integer_lit, 2, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '/', {integer_lit, 42, {1, 0}}, {integer_lit, 2, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     Ops = block_ops(entry, IR),
@@ -164,8 +186,8 @@ div_generates_div_ir_test() ->
 
 mod_generates_mod_ir_test() ->
     AST = make_program([
-        {return_stmt, {binop, '%', {integer_lit, 10, {1, 0}},
-                                   {integer_lit, 3, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '%', {integer_lit, 10, {1, 0}}, {integer_lit, 3, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     Ops = block_ops(entry, IR),
@@ -173,40 +195,40 @@ mod_generates_mod_ir_test() ->
 
 bitwise_and_test() ->
     AST = make_program([
-        {return_stmt, {binop, '&', {integer_lit, 255, {1, 0}},
-                                   {integer_lit, 15, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '&', {integer_lit, 255, {1, 0}}, {integer_lit, 15, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     ?assert(lists:member(and_op, block_ops(entry, IR))).
 
 bitwise_or_test() ->
     AST = make_program([
-        {return_stmt, {binop, '|', {integer_lit, 1, {1, 0}},
-                                   {integer_lit, 2, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '|', {integer_lit, 1, {1, 0}}, {integer_lit, 2, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     ?assert(lists:member(or_op, block_ops(entry, IR))).
 
 bitwise_xor_test() ->
     AST = make_program([
-        {return_stmt, {binop, '^', {integer_lit, 5, {1, 0}},
-                                   {integer_lit, 3, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '^', {integer_lit, 5, {1, 0}}, {integer_lit, 3, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     ?assert(lists:member(xor_op, block_ops(entry, IR))).
 
 left_shift_test() ->
     AST = make_program([
-        {return_stmt, {binop, '<<', {integer_lit, 1, {1, 0}},
-                                    {integer_lit, 4, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '<<', {integer_lit, 1, {1, 0}}, {integer_lit, 4, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     ?assert(lists:member(lsh, block_ops(entry, IR))).
 
 right_shift_test() ->
     AST = make_program([
-        {return_stmt, {binop, '>>', {integer_lit, 16, {1, 0}},
-                                    {integer_lit, 2, {1, 0}}, {1, 0}}, {1, 0}}
+        {return_stmt, {binop, '>>', {integer_lit, 16, {1, 0}}, {integer_lit, 2, {1, 0}}, {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     ?assert(lists:member(rsh, block_ops(entry, IR))).
@@ -251,7 +273,8 @@ xdp_drop_value_test() ->
     ActionInstr = [I || #ir_instr{type = action} = I <- Instrs],
     ?assert(length(ActionInstr) > 0),
     [AI | _] = ActionInstr,
-    ?assertEqual([1], AI#ir_instr.args).  %% XDP_DROP = 1
+    %% XDP_DROP = 1
+    ?assertEqual([1], AI#ir_instr.args).
 
 xdp_pass_value_test() ->
     AST = make_program(xdp, [
@@ -261,7 +284,8 @@ xdp_pass_value_test() ->
     Instrs = block_instrs(entry, IR),
     ActionInstr = [I || #ir_instr{type = action} = I <- Instrs],
     [AI | _] = ActionInstr,
-    ?assertEqual([2], AI#ir_instr.args).  %% XDP_PASS = 2
+    %% XDP_PASS = 2
+    ?assertEqual([2], AI#ir_instr.args).
 
 tc_shot_value_test() ->
     AST = make_program(tc, [
@@ -271,7 +295,8 @@ tc_shot_value_test() ->
     Instrs = block_instrs(entry, IR),
     ActionInstr = [I || #ir_instr{type = action} = I <- Instrs],
     [AI | _] = ActionInstr,
-    ?assertEqual([2], AI#ir_instr.args).  %% TC_SHOT = 2
+    %% TC_SHOT = 2
+    ?assertEqual([2], AI#ir_instr.args).
 
 tc_ok_value_test() ->
     AST = make_program(tc, [
@@ -281,7 +306,8 @@ tc_ok_value_test() ->
     Instrs = block_instrs(entry, IR),
     ActionInstr = [I || #ir_instr{type = action} = I <- Instrs],
     [AI | _] = ActionInstr,
-    ?assertEqual([0], AI#ir_instr.args).  %% TC_OK = 0
+    %% TC_OK = 0
+    ?assertEqual([0], AI#ir_instr.args).
 
 %%% ===================================================================
 %%% If/else control flow
@@ -289,11 +315,11 @@ tc_ok_value_test() ->
 
 if_generates_multiple_blocks_test() ->
     AST = make_program([
-        {if_stmt, {bool_lit, true, {1, 0}},
-            [{return_stmt, {integer_lit, 1, {2, 0}}, {2, 0}}],
-            [],  %% no elifs
-            [],  %% no else
-            {1, 0}},
+        {if_stmt, {bool_lit, true, {1, 0}}, [{return_stmt, {integer_lit, 1, {2, 0}}, {2, 0}}],
+            %% no elifs
+            [],
+            %% no else
+            [], {1, 0}},
         {return_stmt, {integer_lit, 0, {4, 0}}, {4, 0}}
     ]),
     IR = gen(AST),
@@ -302,11 +328,8 @@ if_generates_multiple_blocks_test() ->
 
 if_else_both_branches_test() ->
     AST = make_program([
-        {if_stmt, {bool_lit, true, {1, 0}},
-            [{return_stmt, {integer_lit, 10, {2, 0}}, {2, 0}}],
-            [],
-            [{return_stmt, {integer_lit, 20, {4, 0}}, {4, 0}}],
-            {1, 0}}
+        {if_stmt, {bool_lit, true, {1, 0}}, [{return_stmt, {integer_lit, 10, {2, 0}}, {2, 0}}], [],
+            [{return_stmt, {integer_lit, 20, {4, 0}}, {4, 0}}], {1, 0}}
     ]),
     IR = gen(AST),
     %% Both branches have exit terminators
@@ -317,12 +340,9 @@ if_else_both_branches_test() ->
 if_with_comparison_generates_cmp_branch_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 5, {1, 0}}, {1, 0}},
-        {if_stmt, {binop, '==', {var, <<"x">>, {2, 0}},
-                                {integer_lit, 5, {2, 0}}, {2, 0}},
-            [{return_stmt, {integer_lit, 1, {3, 0}}, {3, 0}}],
-            [],
-            [{return_stmt, {integer_lit, 0, {5, 0}}, {5, 0}}],
-            {2, 0}}
+        {if_stmt, {binop, '==', {var, <<"x">>, {2, 0}}, {integer_lit, 5, {2, 0}}, {2, 0}},
+            [{return_stmt, {integer_lit, 1, {3, 0}}, {3, 0}}], [],
+            [{return_stmt, {integer_lit, 0, {5, 0}}, {5, 0}}], {2, 0}}
     ]),
     IR = gen(AST),
     %% Entry block must have a cond_br with {cmp, eq, ...} terminator
@@ -332,16 +352,16 @@ if_with_comparison_generates_cmp_branch_test() ->
 elif_generates_chain_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 5, {1, 0}}, {1, 0}},
-        {if_stmt, {binop, '==', {var, <<"x">>, {2, 0}},
-                                {integer_lit, 1, {2, 0}}, {2, 0}},
+        {if_stmt, {binop, '==', {var, <<"x">>, {2, 0}}, {integer_lit, 1, {2, 0}}, {2, 0}},
             [{return_stmt, {integer_lit, 10, {3, 0}}, {3, 0}}],
-            [{  %% elif
-                {binop, '==', {var, <<"x">>, {4, 0}},
-                              {integer_lit, 2, {4, 0}}, {4, 0}},
-                [{return_stmt, {integer_lit, 20, {5, 0}}, {5, 0}}]
-            }],
-            [{return_stmt, {integer_lit, 30, {7, 0}}, {7, 0}}],
-            {2, 0}}
+            %% elif
+            [
+                {
+                    {binop, '==', {var, <<"x">>, {4, 0}}, {integer_lit, 2, {4, 0}}, {4, 0}},
+                    [{return_stmt, {integer_lit, 20, {5, 0}}, {5, 0}}]
+                }
+            ],
+            [{return_stmt, {integer_lit, 30, {7, 0}}, {7, 0}}], {2, 0}}
     ]),
     IR = gen(AST),
     %% Should have at least 5 blocks: entry, then1, elif_check, then2, else/join
@@ -354,12 +374,11 @@ elif_generates_chain_test() ->
 for_loop_structure_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"sum">>}, {integer_lit, 0, {1, 0}}, {1, 0}},
-        {for_stmt, <<"i">>, {integer_lit, 0, {2, 0}},
-                            {integer_lit, 5, {2, 0}},
-            [{assign_stmt, {var, <<"sum">>, {3, 0}},
-                           {binop, '+', {var, <<"sum">>, {3, 0}},
-                                        {var, <<"i">>, {3, 0}}, {3, 0}},
-                           {3, 0}}],
+        {for_stmt, <<"i">>, {integer_lit, 0, {2, 0}}, {integer_lit, 5, {2, 0}},
+            [
+                {assign_stmt, {var, <<"sum">>, {3, 0}},
+                    {binop, '+', {var, <<"sum">>, {3, 0}}, {var, <<"i">>, {3, 0}}, {3, 0}}, {3, 0}}
+            ],
             {2, 0}},
         {return_stmt, {var, <<"sum">>, {5, 0}}, {5, 0}}
     ]),
@@ -371,24 +390,25 @@ for_loop_structure_test() ->
 
 for_loop_has_back_edge_test() ->
     AST = make_program([
-        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}},
-                            {integer_lit, 3, {1, 0}},
-            [],
-            {1, 0}},
+        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}}, {integer_lit, 3, {1, 0}}, [], {1, 0}},
         {return_stmt, {integer_lit, 0, {3, 0}}, {3, 0}}
     ]),
     IR = gen(AST),
     %% One of the blocks must branch back to an earlier block (the header)
     %% The latch block has {br, HeaderLabel} — verify a block branches to header
     Blocks = maps:to_list(IR#ir_program.blocks),
-    BackEdgeFound = lists:any(fun({_Label, Block}) ->
-        case Block#ir_block.term of
-            {br, Target} ->
-                %% Check if target appears before this block in program order
-                maps:is_key(Target, IR#ir_program.blocks);
-            _ -> false
-        end
-    end, Blocks),
+    BackEdgeFound = lists:any(
+        fun({_Label, Block}) ->
+            case Block#ir_block.term of
+                {br, Target} ->
+                    %% Check if target appears before this block in program order
+                    maps:is_key(Target, IR#ir_program.blocks);
+                _ ->
+                    false
+            end
+        end,
+        Blocks
+    ),
     ?assert(BackEdgeFound).
 
 %%% ===================================================================
@@ -397,10 +417,8 @@ for_loop_has_back_edge_test() ->
 
 break_generates_branch_to_exit_test() ->
     AST = make_program([
-        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}},
-                            {integer_lit, 10, {1, 0}},
-            [{break_stmt, {2, 0}}],
-            {1, 0}},
+        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}}, {integer_lit, 10, {1, 0}},
+            [{break_stmt, {2, 0}}], {1, 0}},
         {return_stmt, {integer_lit, 0, {4, 0}}, {4, 0}}
     ]),
     IR = gen(AST),
@@ -411,10 +429,8 @@ break_generates_branch_to_exit_test() ->
 
 continue_generates_branch_to_latch_test() ->
     AST = make_program([
-        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}},
-                            {integer_lit, 10, {1, 0}},
-            [{continue_stmt, {2, 0}}],
-            {1, 0}},
+        {for_stmt, <<"i">>, {integer_lit, 0, {1, 0}}, {integer_lit, 10, {1, 0}},
+            [{continue_stmt, {2, 0}}], {1, 0}},
         {return_stmt, {integer_lit, 0, {4, 0}}, {4, 0}}
     ]),
     IR = gen(AST),
@@ -439,11 +455,13 @@ continue_outside_loop_crashes_test() ->
 match_generates_comparison_chain_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 2, {1, 0}}, {1, 0}},
-        {match_stmt, {var, <<"x">>, {2, 0}}, [
-            {{lit_pat, 1}, [{return_stmt, {integer_lit, 10, {3, 0}}, {3, 0}}]},
-            {{lit_pat, 2}, [{return_stmt, {integer_lit, 20, {4, 0}}, {4, 0}}]},
-            {{wildcard},   [{return_stmt, {integer_lit, 0, {5, 0}}, {5, 0}}]}
-        ], {2, 0}}
+        {match_stmt, {var, <<"x">>, {2, 0}},
+            [
+                {{lit_pat, 1}, [{return_stmt, {integer_lit, 10, {3, 0}}, {3, 0}}]},
+                {{lit_pat, 2}, [{return_stmt, {integer_lit, 20, {4, 0}}, {4, 0}}]},
+                {{wildcard}, [{return_stmt, {integer_lit, 0, {5, 0}}, {5, 0}}]}
+            ],
+            {2, 0}}
     ]),
     IR = gen(AST),
     %% Match with 3 arms + join → many blocks
@@ -452,19 +470,24 @@ match_generates_comparison_chain_test() ->
 match_wildcard_always_branches_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 1, {1, 0}}, {1, 0}},
-        {match_stmt, {var, <<"x">>, {2, 0}}, [
-            {{wildcard}, [{return_stmt, {integer_lit, 42, {3, 0}}, {3, 0}}]}
-        ], {2, 0}}
+        {match_stmt, {var, <<"x">>, {2, 0}},
+            [
+                {{wildcard}, [{return_stmt, {integer_lit, 42, {3, 0}}, {3, 0}}]}
+            ],
+            {2, 0}}
     ]),
     IR = gen(AST),
     %% Wildcard arm should use unconditional branch (br), not cond_br
     Blocks = maps:values(IR#ir_program.blocks),
-    WildcardBranch = lists:any(fun(B) ->
-        case B#ir_block.term of
-            {br, _} -> true;
-            _ -> false
-        end
-    end, Blocks),
+    WildcardBranch = lists:any(
+        fun(B) ->
+            case B#ir_block.term of
+                {br, _} -> true;
+                _ -> false
+            end
+        end,
+        Blocks
+    ),
     ?assert(WildcardBranch).
 
 %%% ===================================================================
@@ -473,8 +496,7 @@ match_wildcard_always_branches_test() ->
 
 ctx_field_access_generates_load_test() ->
     AST = make_program(xdp, [
-        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}},
-                                     <<"data">>, {1, 0}}, {1, 0}}
+        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}}, <<"data">>, {1, 0}}, {1, 0}}
     ]),
     IR = gen(AST),
     Instrs = block_instrs(entry, IR),
@@ -488,8 +510,7 @@ ctx_field_access_generates_load_test() ->
 
 ctx_data_end_offset_test() ->
     AST = make_program(xdp, [
-        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}},
-                                     <<"data_end">>, {1, 0}}, {1, 0}}
+        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}}, <<"data_end">>, {1, 0}}, {1, 0}}
     ]),
     IR = gen(AST),
     Instrs = block_instrs(entry, IR),
@@ -500,8 +521,7 @@ ctx_data_end_offset_test() ->
 
 tc_field_access_test() ->
     AST = make_program(tc, [
-        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}},
-                                     <<"len">>, {1, 0}}, {1, 0}}
+        {return_stmt, {field_access, {var, <<"ctx">>, {1, 0}}, <<"len">>, {1, 0}}, {1, 0}}
     ]),
     IR = gen(AST),
     Instrs = block_instrs(entry, IR),
@@ -527,9 +547,9 @@ helper_call_generates_call_helper_test() ->
 
 helper_call_with_args_test() ->
     AST = make_program([
-        {return_stmt, {call, <<"test_fn">>,
-                       [{integer_lit, 1, {1, 0}}, {integer_lit, 2, {1, 0}}],
-                       {1, 0}}, {1, 0}}
+        {return_stmt,
+            {call, <<"test_fn">>, [{integer_lit, 1, {1, 0}}, {integer_lit, 2, {1, 0}}], {1, 0}},
+            {1, 0}}
     ]),
     IR = gen(AST),
     Instrs = block_instrs(entry, IR),
@@ -550,29 +570,42 @@ map_lookup_generates_helper_and_null_check_test() ->
         type = xdp,
         name = <<"test">>,
         types = [],
-        maps = [#map_decl{name = <<"counters">>, kind = hash,
-                          key_type = {prim, u32}, value_type = {prim, u64},
-                          max_entries = 256, loc = {1, 0}}],
+        maps = [
+            #map_decl{
+                name = <<"counters">>,
+                kind = hash,
+                key_type = {prim, u32},
+                value_type = {prim, u64},
+                max_entries = 256,
+                loc = {1, 0}
+            }
+        ],
         consts = [],
-        fns = [#fn_decl{
-            name = <<"main">>,
-            params = [{<<"ctx">>, {prim, u64}}],
-            ret_type = {prim, u64},
-            body = [
-                {return_stmt,
-                    {call, <<"map_lookup">>,
-                        [{var, <<"counters">>, {2, 0}},
-                         {integer_lit, 1, {2, 0}}],
-                        {2, 0}},
-                    {2, 0}}
-            ],
-            loc = {1, 0}
-        }]
+        fns = [
+            #fn_decl{
+                name = <<"main">>,
+                params = [{<<"ctx">>, {prim, u64}}],
+                ret_type = {prim, u64},
+                body = [
+                    {return_stmt,
+                        {call, <<"map_lookup">>,
+                            [
+                                {var, <<"counters">>, {2, 0}},
+                                {integer_lit, 1, {2, 0}}
+                            ],
+                            {2, 0}},
+                        {2, 0}}
+                ],
+                loc = {1, 0}
+            }
+        ]
     },
     IR = gen(AST),
     %% Map lookup generates: stack store, ld_map_fd, call_helper, null check
-    AllInstrs = lists:flatmap(fun(B) -> B#ir_block.instrs end,
-                              maps:values(IR#ir_program.blocks)),
+    AllInstrs = lists:flatmap(
+        fun(B) -> B#ir_block.instrs end,
+        maps:values(IR#ir_program.blocks)
+    ),
     AllOps = [I#ir_instr.op || I <- AllInstrs],
     ?assert(lists:member(ld_map_fd, AllOps)),
     ?assert(lists:member(call_helper, AllOps)),
@@ -585,36 +618,50 @@ map_update_generates_four_arg_call_test() ->
         type = xdp,
         name = <<"test">>,
         types = [],
-        maps = [#map_decl{name = <<"m">>, kind = hash,
-                          key_type = {prim, u32}, value_type = {prim, u64},
-                          max_entries = 16, loc = {1, 0}}],
+        maps = [
+            #map_decl{
+                name = <<"m">>,
+                kind = hash,
+                key_type = {prim, u32},
+                value_type = {prim, u64},
+                max_entries = 16,
+                loc = {1, 0}
+            }
+        ],
         consts = [],
-        fns = [#fn_decl{
-            name = <<"main">>,
-            params = [{<<"ctx">>, {prim, u64}}],
-            ret_type = {prim, u64},
-            body = [
-                {expr_stmt,
-                    {call, <<"map_update">>,
-                        [{var, <<"m">>, {2, 0}},
-                         {integer_lit, 1, {2, 0}},
-                         {integer_lit, 100, {2, 0}}],
+        fns = [
+            #fn_decl{
+                name = <<"main">>,
+                params = [{<<"ctx">>, {prim, u64}}],
+                ret_type = {prim, u64},
+                body = [
+                    {expr_stmt,
+                        {call, <<"map_update">>,
+                            [
+                                {var, <<"m">>, {2, 0}},
+                                {integer_lit, 1, {2, 0}},
+                                {integer_lit, 100, {2, 0}}
+                            ],
+                            {2, 0}},
                         {2, 0}},
-                    {2, 0}},
-                {return_stmt, {integer_lit, 0, {3, 0}}, {3, 0}}
-            ],
-            loc = {1, 0}
-        }]
+                    {return_stmt, {integer_lit, 0, {3, 0}}, {3, 0}}
+                ],
+                loc = {1, 0}
+            }
+        ]
     },
     IR = gen(AST),
-    AllInstrs = lists:flatmap(fun(B) -> B#ir_block.instrs end,
-                              maps:values(IR#ir_program.blocks)),
+    AllInstrs = lists:flatmap(
+        fun(B) -> B#ir_block.instrs end,
+        maps:values(IR#ir_program.blocks)
+    ),
     CallInstrs = [I || #ir_instr{op = call_helper} = I <- AllInstrs],
     ?assert(length(CallInstrs) > 0),
     [C | _] = CallInstrs,
     %% map_update_elem has 4 args: map_fd, key_ptr, val_ptr, flags
     ?assertMatch({fn, <<"map_update_elem">>}, hd(C#ir_instr.args)),
-    ?assertEqual(5, length(C#ir_instr.args)).  %% {fn,...} + 4 regs
+    %% {fn,...} + 4 regs
+    ?assertEqual(5, length(C#ir_instr.args)).
 
 %%% ===================================================================
 %%% Struct types
@@ -624,33 +671,40 @@ struct_layout_computed_correctly_test() ->
     AST = #program{
         type = xdp,
         name = <<"test">>,
-        types = [#type_decl{
-            name = <<"Point">>,
-            fields = [{<<"x">>, {prim, u32}}, {<<"y">>, {prim, u32}}],
-            loc = {1, 0}
-        }],
+        types = [
+            #type_decl{
+                name = <<"Point">>,
+                fields = [{<<"x">>, {prim, u32}}, {<<"y">>, {prim, u32}}],
+                loc = {1, 0}
+            }
+        ],
         maps = [],
         consts = [],
-        fns = [#fn_decl{
-            name = <<"main">>,
-            params = [{<<"ctx">>, {prim, u64}}],
-            ret_type = {prim, u64},
-            body = [
-                {let_stmt, {var_pat, <<"p">>},
-                    {struct_lit, <<"Point">>,
-                        [{<<"x">>, {integer_lit, 10, {2, 0}}},
-                         {<<"y">>, {integer_lit, 20, {2, 0}}}],
+        fns = [
+            #fn_decl{
+                name = <<"main">>,
+                params = [{<<"ctx">>, {prim, u64}}],
+                ret_type = {prim, u64},
+                body = [
+                    {let_stmt, {var_pat, <<"p">>},
+                        {struct_lit, <<"Point">>,
+                            [
+                                {<<"x">>, {integer_lit, 10, {2, 0}}},
+                                {<<"y">>, {integer_lit, 20, {2, 0}}}
+                            ],
+                            {2, 0}},
                         {2, 0}},
-                    {2, 0}},
-                {return_stmt, {field_access, {var, <<"p">>, {3, 0}},
-                                             <<"y">>, {3, 0}}, {3, 0}}
-            ],
-            loc = {1, 0}
-        }]
+                    {return_stmt, {field_access, {var, <<"p">>, {3, 0}}, <<"y">>, {3, 0}}, {3, 0}}
+                ],
+                loc = {1, 0}
+            }
+        ]
     },
     IR = gen(AST),
-    AllInstrs = lists:flatmap(fun(B) -> B#ir_block.instrs end,
-                              maps:values(IR#ir_program.blocks)),
+    AllInstrs = lists:flatmap(
+        fun(B) -> B#ir_block.instrs end,
+        maps:values(IR#ir_program.blocks)
+    ),
     %% Struct lit should generate store instructions
     StoreInstrs = [I || #ir_instr{op = store} = I <- AllInstrs],
     ?assert(length(StoreInstrs) >= 2),
@@ -658,8 +712,11 @@ struct_layout_computed_correctly_test() ->
     LoadInstrs = [I || #ir_instr{op = load} = I <- AllInstrs],
     ?assert(length(LoadInstrs) > 0),
     %% Check that the y field access has correct offset (4 for u32 after u32)
-    YLoads = [I || #ir_instr{op = load, args = [_, {struct_field, <<"y">>, 4, 4}]} = I
-                   <- AllInstrs],
+    YLoads = [
+        I
+     || #ir_instr{op = load, args = [_, {struct_field, <<"y">>, 4, 4}]} = I <-
+            AllInstrs
+    ],
     ?assert(length(YLoads) > 0).
 
 %%% ===================================================================
@@ -669,8 +726,7 @@ struct_layout_computed_correctly_test() ->
 assignment_copies_back_test() ->
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 1, {1, 0}}, {1, 0}},
-        {assign_stmt, {var, <<"x">>, {2, 0}},
-                       {integer_lit, 2, {2, 0}}, {2, 0}},
+        {assign_stmt, {var, <<"x">>, {2, 0}}, {integer_lit, 2, {2, 0}}, {2, 0}},
         {return_stmt, {var, <<"x">>, {3, 0}}, {3, 0}}
     ]),
     IR = gen(AST),
@@ -725,10 +781,10 @@ method_call_desugars_test() ->
     %% obj.method(arg) → method(obj, arg)
     AST = make_program([
         {let_stmt, {var_pat, <<"x">>}, {integer_lit, 1, {1, 0}}, {1, 0}},
-        {return_stmt, {method_call, {var, <<"x">>, {2, 0}},
-                                    <<"do_something">>,
-                                    [{integer_lit, 2, {2, 0}}],
-                                    {2, 0}}, {2, 0}}
+        {return_stmt,
+            {method_call, {var, <<"x">>, {2, 0}}, <<"do_something">>, [{integer_lit, 2, {2, 0}}],
+                {2, 0}},
+            {2, 0}}
     ]),
     IR = gen(AST),
     Instrs = block_instrs(entry, IR),
@@ -751,8 +807,13 @@ reg_types_tracked_test() ->
     %% v_ctx should be tracked as {ptr, ctx}
     ?assertEqual({ptr, ctx}, maps:get(v_ctx, IR#ir_program.reg_types)),
     %% The literal register should be tracked as {scalar, u64}
-    IntRegs = [R || {R, {scalar, u64}} <- maps:to_list(IR#ir_program.reg_types),
-                    R =/= v_ret, R =/= v_ctx, R =/= v_fp],
+    IntRegs = [
+        R
+     || {R, {scalar, u64}} <- maps:to_list(IR#ir_program.reg_types),
+        R =/= v_ret,
+        R =/= v_ctx,
+        R =/= v_fp
+    ],
     ?assert(length(IntRegs) > 0).
 
 %%% ===================================================================
@@ -760,13 +821,16 @@ reg_types_tracked_test() ->
 %%% ===================================================================
 
 program_type_propagated_test() ->
-    lists:foreach(fun(PT) ->
-        AST = make_program(PT, [
-            {return_stmt, {integer_lit, 0, {1, 0}}, {1, 0}}
-        ]),
-        IR = gen(AST),
-        ?assertEqual(PT, IR#ir_program.prog_type)
-    end, [xdp, tc, cgroup, socket]).
+    lists:foreach(
+        fun(PT) ->
+            AST = make_program(PT, [
+                {return_stmt, {integer_lit, 0, {1, 0}}, {1, 0}}
+            ]),
+            IR = gen(AST),
+            ?assertEqual(PT, IR#ir_program.prog_type)
+        end,
+        [xdp, tc, cgroup, socket]
+    ).
 
 entry_label_is_entry_test() ->
     AST = make_program([{return_stmt, {integer_lit, 0, {1, 0}}, {1, 0}}]),
@@ -782,15 +846,19 @@ pkt_read_non_constant_offset_errors_test() ->
     %% not silently fall back to offset 0.
     AST = make_program([
         {let_stmt, {var_pat, <<"data">>},
-                   {field_access, {var, <<"ctx">>, {1, 0}}, <<"data">>, {1, 0}},
-                   {1, 0}},
+            {field_access, {var, <<"ctx">>, {1, 0}}, <<"data">>, {1, 0}}, {1, 0}},
         {let_stmt, {var_pat, <<"off">>}, {integer_lit, 14, {2, 0}}, {2, 0}},
         {return_stmt,
             {call, <<"read_u16_be">>,
-                [{var, <<"data">>, {3, 0}},
-                 {var, <<"off">>, {3, 0}}],   %% variable, not literal
+                [
+                    {var, <<"data">>, {3, 0}},
+                    %% variable, not literal
+                    {var, <<"off">>, {3, 0}}
+                ],
                 {3, 0}},
             {3, 0}}
     ]),
-    ?assertError({compile_error, {non_constant_offset, <<"read_u16_be">>}},
-                 gen(AST)).
+    ?assertError(
+        {compile_error, {non_constant_offset, <<"read_u16_be">>}},
+        gen(AST)
+    ).

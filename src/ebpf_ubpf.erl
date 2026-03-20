@@ -1,33 +1,62 @@
-%% @doc Erlang API for the uBPF userspace eBPF VM.
 %%
-%% Communicates with the ubpf_port C program via an Erlang port
-%% using {packet, 4} framing.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_ubpf).
+-moduledoc """
+Erlang API for the uBPF userspace eBPF VM.
 
--export([start/0, stop/1, load/2, run/2, run_xdp/2,
-         create_map/4, reset_maps/1, map_get/3, map_dump/2]).
+Communicates with the ubpf_port C program via an Erlang port
+using {packet, 4} framing.
+""".
 
-%% @doc Start the uBPF port process.
+-export([
+    start/0,
+    stop/1,
+    load/2,
+    run/2,
+    run_xdp/2,
+    create_map/4,
+    reset_maps/1,
+    map_get/3,
+    map_dump/2
+]).
+
+-doc "Start the uBPF port process.".
 -spec start() -> {ok, port()} | {error, ubpf_port_not_found}.
 start() ->
     PortPath = filename:join(code:priv_dir(erlkoenig_ebpf), "ubpf_port"),
     case filelib:is_file(PortPath) of
         true ->
-            Port = open_port({spawn_executable, PortPath},
-                             [binary, {packet, 4}, exit_status, use_stdio]),
+            Port = open_port(
+                {spawn_executable, PortPath},
+                [binary, {packet, 4}, exit_status, use_stdio]
+            ),
             {ok, Port};
         false ->
             {error, ubpf_port_not_found}
     end.
 
-%% @doc Stop the uBPF port process.
+-doc "Stop the uBPF port process.".
 -spec stop(port()) -> ok.
 stop(Port) ->
     port_command(Port, <<16#FF>>),
     port_close(Port),
     ok.
 
-%% @doc Load BPF bytecode into the VM.
+-doc "Load BPF bytecode into the VM.".
 -spec load(port(), binary()) -> ok | {error, binary() | timeout}.
 load(Port, Bytecode) when is_binary(Bytecode) ->
     %% Patch ld_map_fd (BPF_PSEUDO_MAP_FD) → ld64_imm for uBPF compatibility.
@@ -40,7 +69,7 @@ load(Port, Bytecode) when is_binary(Bytecode) ->
         {error, timeout}
     end.
 
-%% @doc Execute the loaded BPF program with context data.
+-doc "Execute the loaded BPF program with context data.".
 -spec run(port(), binary()) -> {ok, non_neg_integer()} | {error, binary() | timeout}.
 run(Port, CtxData) when is_binary(CtxData) ->
     port_command(Port, <<16#02, CtxData/binary>>),
@@ -51,8 +80,7 @@ run(Port, CtxData) when is_binary(CtxData) ->
         {error, timeout}
     end.
 
-%% @doc Execute the loaded BPF program with XDP context.
-%% The C port constructs xdp_md with correct pointers to the packet data.
+-doc "Execute the loaded BPF program with XDP context. The C port constructs xdp_md with correct pointers to the packet data.".
 -spec run_xdp(port(), binary()) -> {ok, non_neg_integer()} | {error, binary() | timeout}.
 run_xdp(Port, PacketBin) when is_binary(PacketBin) ->
     port_command(Port, <<16#03, PacketBin/binary>>),
@@ -63,8 +91,7 @@ run_xdp(Port, PacketBin) when is_binary(PacketBin) ->
         {error, timeout}
     end.
 
-%% @doc Create a hash map in the uBPF port.
-%% Returns the map fd (index) assigned by the port.
+-doc "Create a hash map in the uBPF port. Returns the map fd (index) assigned by the port.".
 -spec create_map(port(), pos_integer(), pos_integer(), pos_integer()) ->
     {ok, non_neg_integer()} | {error, binary() | timeout}.
 create_map(Port, KeySize, ValSize, MaxEntries) ->
@@ -77,7 +104,7 @@ create_map(Port, KeySize, ValSize, MaxEntries) ->
         {error, timeout}
     end.
 
-%% @doc Destroy all maps in the uBPF port.
+-doc "Destroy all maps in the uBPF port.".
 -spec reset_maps(port()) -> ok | {error, binary() | timeout}.
 reset_maps(Port) ->
     port_command(Port, <<16#05>>),
@@ -88,7 +115,7 @@ reset_maps(Port) ->
         {error, timeout}
     end.
 
-%% @doc Get a single value from a map by key.
+-doc "Get a single value from a map by key.".
 -spec map_get(port(), non_neg_integer(), binary()) ->
     {ok, binary()} | {error, binary() | timeout}.
 map_get(Port, Fd, KeyBin) when is_binary(KeyBin) ->
@@ -101,8 +128,7 @@ map_get(Port, Fd, KeyBin) when is_binary(KeyBin) ->
         {error, timeout}
     end.
 
-%% @doc Dump all entries from a map.
-%% Returns a list of {Key, Value} binary pairs.
+-doc "Dump all entries from a map. Returns a list of {Key, Value} binary pairs.".
 -spec map_dump(port(), non_neg_integer()) ->
     {ok, {non_neg_integer(), binary()}} | {error, binary() | timeout}.
 map_dump(Port, Fd) ->

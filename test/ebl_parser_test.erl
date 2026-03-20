@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_parser_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebl_ast.hrl").
 
 %%% ===================================================================
@@ -7,11 +24,13 @@
 %%% ===================================================================
 
 acceptance_test() ->
-    Src = <<"xdp my_prog do\n"
-            "  fn main(ctx) -> action do\n"
-            "    return :pass\n"
-            "  end\n"
-            "end">>,
+    Src = <<
+        "xdp my_prog do\n"
+        "  fn main(ctx) -> action do\n"
+        "    return :pass\n"
+        "  end\n"
+        "end"
+    >>,
     {ok, Tokens} = ebl_lexer:tokenize(Src),
     {ok, Prog} = ebl_parser:parse(Tokens),
     ?assertEqual(xdp, Prog#program.type),
@@ -40,12 +59,14 @@ program_with_direction_test() ->
 %%% ===================================================================
 
 type_decl_test() ->
-    Src = <<"xdp test do\n"
-            "  type IpAddr do\n"
-            "    addr : u32\n"
-            "    port : u16\n"
-            "  end\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  type IpAddr do\n"
+        "    addr : u32\n"
+        "    port : u16\n"
+        "  end\n"
+        "end"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     ?assertEqual(1, length(P#program.types)),
@@ -58,9 +79,11 @@ type_decl_test() ->
 %%% ===================================================================
 
 map_decl_test() ->
-    Src = <<"xdp test do\n"
-            "  map :counters, hash, key: u32, value: u64, max_entries: 1024\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  map :counters, hash, key: u32, value: u64, max_entries: 1024\n"
+        "end"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     ?assertEqual(1, length(P#program.maps)),
@@ -76,9 +99,11 @@ map_decl_test() ->
 %%% ===================================================================
 
 const_decl_test() ->
-    Src = <<"xdp test do\n"
-            "  const MAX_SIZE : u32 = 1500\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  const MAX_SIZE : u32 = 1500\n"
+        "end"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     ?assertEqual(1, length(P#program.consts)),
@@ -90,27 +115,33 @@ const_decl_test() ->
 %%% ===================================================================
 
 fn_no_ret_type_test() ->
-    Src = <<"xdp test do\n"
-            "  fn helper(x) do\n"
-            "    return x\n"
-            "  end\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  fn helper(x) do\n"
+        "    return x\n"
+        "  end\n"
+        "end"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
     ?assertEqual(undefined, Fn#fn_decl.ret_type).
 
 fn_typed_params_test() ->
-    Src = <<"xdp test do\n"
-            "  fn add(a : u32, b : u32) -> u32 do\n"
-            "    return a + b\n"
-            "  end\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  fn add(a : u32, b : u32) -> u32 do\n"
+        "    return a + b\n"
+        "  end\n"
+        "end"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
-    ?assertEqual([{<<"a">>, {prim, u32}}, {<<"b">>, {prim, u32}}],
-                 Fn#fn_decl.params),
+    ?assertEqual(
+        [{<<"a">>, {prim, u32}}, {<<"b">>, {prim, u32}}],
+        Fn#fn_decl.params
+    ),
     ?assertEqual({prim, u32}, Fn#fn_decl.ret_type).
 
 %%% ===================================================================
@@ -146,39 +177,45 @@ return_atom_test() ->
 %%% ===================================================================
 
 if_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    if x == 1 do\n"
-            "      return :drop\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    if x == 1 do\n"
+        "      return :drop\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
     [{if_stmt, _, _, [], [], _}] = Fn#fn_decl.body.
 
 if_else_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    if x == 1 do\n"
-            "      return :drop\n"
-            "    else\n"
-            "      return :pass\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    if x == 1 do\n"
+        "      return :drop\n"
+        "    else\n"
+        "      return :pass\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
     [{if_stmt, _, [_], [], [_], _}] = Fn#fn_decl.body.
 
 if_elif_else_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    if x == 1 do\n"
-            "      return :drop\n"
-            "    elif x == 2 do\n"
-            "      return :pass\n"
-            "    else\n"
-            "      return :drop\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    if x == 1 do\n"
+        "      return :drop\n"
+        "    elif x == 2 do\n"
+        "      return :pass\n"
+        "    else\n"
+        "      return :drop\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
@@ -189,11 +226,13 @@ if_elif_else_test() ->
 %%% ===================================================================
 
 for_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    for i in 0..10 do\n"
-            "      x = x + 1\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    for i in 0..10 do\n"
+        "      x = x + 1\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
@@ -204,12 +243,14 @@ for_test() ->
 %%% ===================================================================
 
 match_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    match x do\n"
-            "      1 -> return :drop\n"
-            "      _ -> return :pass\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    match x do\n"
+        "      1 -> return :drop\n"
+        "      _ -> return :pass\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
@@ -276,9 +317,11 @@ field_access_test() ->
 %%% ===================================================================
 
 struct_lit_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    let s = %MyStruct{a: 1, b: 2}\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    let s = %MyStruct{a: 1, b: 2}\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
@@ -290,17 +333,25 @@ struct_lit_test() ->
 %%% ===================================================================
 
 some_none_test() ->
-    Src = <<"xdp t do\n  fn f(x) do\n"
-            "    match x do\n"
-            "      Some(v) -> return v\n"
-            "      None -> return 0\n"
-            "    end\n"
-            "  end\nend">>,
+    Src = <<
+        "xdp t do\n  fn f(x) do\n"
+        "    match x do\n"
+        "      Some(v) -> return v\n"
+        "      None -> return 0\n"
+        "    end\n"
+        "  end\nend"
+    >>,
     {ok, T} = ebl_lexer:tokenize(Src),
     {ok, P} = ebl_parser:parse(T),
     [Fn] = P#program.fns,
-    [{match_stmt, _, [{{some_pat, {var_pat, <<"v">>}}, _},
-                       {{none_pat}, _}], _}] = Fn#fn_decl.body.
+    [
+        {match_stmt, _,
+            [
+                {{some_pat, {var_pat, <<"v">>}}, _},
+                {{none_pat}, _}
+            ],
+            _}
+    ] = Fn#fn_decl.body.
 
 %%% ===================================================================
 %%% Error handling
