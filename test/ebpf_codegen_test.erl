@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_codegen_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebpf_ir.hrl").
 -include("ebpf_opcodes.hrl").
 
@@ -36,11 +53,20 @@ ctx_survives_helper_call_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = v_ret,
-                      args = [{fn, test_helper}],
-                      type = {scalar, u64}, loc = undefined},
-            #ir_instr{op = mov, dst = v_ret, args = [v_ctx],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = call_helper,
+                dst = v_ret,
+                args = [{fn, test_helper}],
+                type = {scalar, u64},
+                loc = undefined
+            },
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [v_ctx],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -70,11 +96,13 @@ ctx_survives_helper_call_test() ->
 
 %% End-to-end: compiled program with ctx still produces correct output.
 e2e_prolog_test() ->
-    Src = <<"xdp test do\n"
-            "  fn main(ctx) -> u64 do\n"
-            "    return 42\n"
-            "  end\n"
-            "end">>,
+    Src = <<
+        "xdp test do\n"
+        "  fn main(ctx) -> u64 do\n"
+        "    return 42\n"
+        "  end\n"
+        "end"
+    >>,
     {ok, Bin} = ebl_compile:compile(Src),
     %% First instruction must be mov r6, r1
     <<First:8/binary, _/binary>> = Bin,
@@ -96,9 +124,13 @@ helper_call_ktime_bytecode_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = v_ret,
-                      args = [{fn, <<"ktime_get_ns">>}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = call_helper,
+                dst = v_ret,
+                args = [{fn, <<"ktime_get_ns">>}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -125,11 +157,20 @@ helper_call_with_args_bytecode_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = mov, dst = {v, 1}, args = [100],
-                      type = {scalar, u64}, loc = undefined},
-            #ir_instr{op = call_helper, dst = v_ret,
-                      args = [{fn, <<"map_lookup_elem">>}, {v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = {v, 1},
+                args = [100],
+                type = {scalar, u64},
+                loc = undefined
+            },
+            #ir_instr{
+                op = call_helper,
+                dst = v_ret,
+                args = [{fn, <<"map_lookup_elem">>}, {v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -164,11 +205,20 @@ helper_call_result_transfer_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = {v, 1},
-                      args = [{fn, <<"ktime_get_ns">>}],
-                      type = {scalar, u64}, loc = undefined},
-            #ir_instr{op = mov, dst = v_ret, args = [{v, 1}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = call_helper,
+                dst = {v, 1},
+                args = [{fn, <<"ktime_get_ns">>}],
+                type = {scalar, u64},
+                loc = undefined
+            },
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [{v, 1}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -195,9 +245,13 @@ helper_call_ktime_vm_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = v_ret,
-                      args = [{fn, <<"ktime_get_ns">>}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = call_helper,
+                dst = v_ret,
+                args = [{fn, <<"ktime_get_ns">>}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -219,9 +273,13 @@ helper_call_cpu_id_vm_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = v_ret,
-                      args = [{fn, <<"get_smp_processor_id">>}],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = call_helper,
+                dst = v_ret,
+                args = [{fn, <<"get_smp_processor_id">>}],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -242,13 +300,21 @@ helper_call_result_used_test() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = call_helper, dst = {v, 1},
-                      args = [{fn, <<"get_smp_processor_id">>}],
-                      type = {scalar, u64}, loc = undefined},
+            #ir_instr{
+                op = call_helper,
+                dst = {v, 1},
+                args = [{fn, <<"get_smp_processor_id">>}],
+                type = {scalar, u64},
+                loc = undefined
+            },
             %% Add 42 to the result (0 + 42 = 42)
-            #ir_instr{op = add, dst = v_ret,
-                      args = [{v, 1}, 42],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = add,
+                dst = v_ret,
+                args = [{v, 1}, 42],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },
@@ -272,8 +338,13 @@ make_trivial_program() ->
     Block = #ir_block{
         label = entry,
         instrs = [
-            #ir_instr{op = mov, dst = v_ret, args = [0],
-                      type = {scalar, u64}, loc = undefined}
+            #ir_instr{
+                op = mov,
+                dst = v_ret,
+                args = [0],
+                type = {scalar, u64},
+                loc = undefined
+            }
         ],
         term = {exit, v_ret}
     },

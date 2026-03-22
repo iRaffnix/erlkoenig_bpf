@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_pkt_xval_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -include("ebpf_vm.hrl").
 
 %%% ===================================================================
@@ -70,10 +87,14 @@ xval_read_ethertype_test() ->
     %% Read Ethertype at offset 12, apply be16 to get network byte order value
     Pkt = make_eth_ip_pkt({10, 0, 0, 1}, {10, 0, 0, 2}),
     Prog = ebpf_insn:assemble([
-        ebpf_insn:mov64_reg(6, 1),     %% save ctx
-        ebpf_insn:ldxw(1, 6, 0),       %% R1 = ctx.data
-        ebpf_insn:ldxh(0, 1, 12),      %% R0 = ethertype (LE read)
-        ebpf_insn:be16(0),             %% swap to network order → 0x0800
+        %% save ctx
+        ebpf_insn:mov64_reg(6, 1),
+        %% R1 = ctx.data
+        ebpf_insn:ldxw(1, 6, 0),
+        %% R0 = ethertype (LE read)
+        ebpf_insn:ldxh(0, 1, 12),
+        %% swap to network order → 0x0800
+        ebpf_insn:be16(0),
         ebpf_insn:exit_insn()
     ]),
     assert_xval_xdp(Prog, Pkt, 16#0800).
@@ -84,10 +105,12 @@ xval_read_ip_protocol_test() ->
     Prog = ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
         ebpf_insn:ldxw(1, 6, 0),
-        ebpf_insn:ldxb(0, 1, 23),      %% protocol byte
+        %% protocol byte
+        ebpf_insn:ldxb(0, 1, 23),
         ebpf_insn:exit_insn()
     ]),
-    assert_xval_xdp(Prog, Pkt, 6).  %% TCP
+    %% TCP
+    assert_xval_xdp(Prog, Pkt, 6).
 
 xval_read_src_ip_test() ->
     %% Source IP at offset 26, be32 for network → host
@@ -123,25 +146,29 @@ xval_bounds_check_short_pkt_test() ->
     %% Short packet (10 bytes) → bounds check for 34 → XDP_PASS (2)
     Pkt = <<0:80>>,
     Prog = make_bounds_check_prog(34),
-    assert_xval_xdp(Prog, Pkt, 2).  %% XDP_PASS
+    %% XDP_PASS
+    assert_xval_xdp(Prog, Pkt, 2).
 
 xval_bounds_check_long_pkt_test() ->
     %% Full packet → bounds check passes → XDP_DROP (1)
     Pkt = make_eth_ip_pkt({10, 0, 0, 1}, {10, 0, 0, 2}),
     Prog = make_bounds_check_prog(34),
-    assert_xval_xdp(Prog, Pkt, 1).  %% XDP_DROP
+    %% XDP_DROP
+    assert_xval_xdp(Prog, Pkt, 1).
 
 xval_bounds_check_exact_size_test() ->
     %% Packet exactly 34 bytes → data+34 == data_end → NOT greater → DROP
-    Pkt = <<0:(34*8)>>,
+    Pkt = <<0:(34 * 8)>>,
     Prog = make_bounds_check_prog(34),
-    assert_xval_xdp(Prog, Pkt, 1).  %% XDP_DROP (not strictly greater)
+    %% XDP_DROP (not strictly greater)
+    assert_xval_xdp(Prog, Pkt, 1).
 
 xval_bounds_check_one_short_test() ->
     %% Packet 33 bytes → data+34 > data_end → PASS
-    Pkt = <<0:(33*8)>>,
+    Pkt = <<0:(33 * 8)>>,
     Prog = make_bounds_check_prog(34),
-    assert_xval_xdp(Prog, Pkt, 2).  %% XDP_PASS
+    %% XDP_PASS
+    assert_xval_xdp(Prog, Pkt, 2).
 
 %%% ===================================================================
 %%% Full XDP IP filter pattern
@@ -151,13 +178,15 @@ xval_ethertype_filter_ip_test() ->
     %% Accept only IPv4 (ethertype 0x0800), return DROP(1) for IP, PASS(2) for non-IP
     Pkt = make_eth_ip_pkt({10, 0, 0, 1}, {10, 0, 0, 2}),
     Prog = make_ethertype_filter_prog(),
-    assert_xval_xdp(Prog, Pkt, 1).  %% DROP (is IPv4)
+    %% DROP (is IPv4)
+    assert_xval_xdp(Prog, Pkt, 1).
 
 xval_ethertype_filter_arp_test() ->
     %% ARP packet (ethertype 0x0806) → PASS
     Pkt = make_arp_pkt(),
     Prog = make_ethertype_filter_prog(),
-    assert_xval_xdp(Prog, Pkt, 2).  %% PASS (not IPv4)
+    %% PASS (not IPv4)
+    assert_xval_xdp(Prog, Pkt, 2).
 
 %%% ===================================================================
 %%% Helpers: packet construction
@@ -173,22 +202,22 @@ make_eth_ip_pkt({S1, S2, S3, S4}, {D1, D2, D3, D4}) ->
     Ident = <<0, 0>>,
     Flags = <<0, 0>>,
     TTL = 64,
-    Protocol = 6,  %% TCP
+    %% TCP
+    Protocol = 6,
     Checksum = <<0, 0>>,
     SrcIP = <<S1, S2, S3, S4>>,
     DstIP = <<D1, D2, D3, D4>>,
     TcpStub = <<0:160>>,
-    <<EthDst/binary, EthSrc/binary, EthType/binary,
-      IHL_Ver, DSCP, TotalLen/binary, Ident/binary,
-      Flags/binary, TTL, Protocol, Checksum/binary,
-      SrcIP/binary, DstIP/binary, TcpStub/binary>>.
+    <<EthDst/binary, EthSrc/binary, EthType/binary, IHL_Ver, DSCP, TotalLen/binary, Ident/binary,
+        Flags/binary, TTL, Protocol, Checksum/binary, SrcIP/binary, DstIP/binary, TcpStub/binary>>.
 
 make_arp_pkt() ->
     EthDst = <<16#FF, 16#FF, 16#FF, 16#FF, 16#FF, 16#FF>>,
     EthSrc = <<16#00, 16#11, 16#22, 16#33, 16#44, 16#55>>,
-    EthType = <<16#08, 16#06>>,  %% ARP
+    %% ARP
+    EthType = <<16#08, 16#06>>,
     %% Minimal ARP body (28 bytes)
-    ArpBody = <<0:(28*8)>>,
+    ArpBody = <<0:(28 * 8)>>,
     <<EthDst/binary, EthSrc/binary, EthType/binary, ArpBody/binary>>.
 
 %%% ===================================================================
@@ -199,14 +228,20 @@ make_arp_pkt() ->
 make_bounds_check_prog(N) ->
     ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
-        ebpf_insn:ldxw(2, 6, 0),      %% R2 = ctx.data
-        ebpf_insn:ldxw(3, 6, 4),      %% R3 = ctx.data_end
+        %% R2 = ctx.data
+        ebpf_insn:ldxw(2, 6, 0),
+        %% R3 = ctx.data_end
+        ebpf_insn:ldxw(3, 6, 4),
         ebpf_insn:mov64_reg(4, 2),
-        ebpf_insn:add64_imm(4, N),    %% R4 = data + N
-        ebpf_insn:jgt_reg(4, 3, 2),   %% if too short → PASS
-        ebpf_insn:mov64_imm(0, 1),    %% DROP
+        %% R4 = data + N
+        ebpf_insn:add64_imm(4, N),
+        %% if too short → PASS
+        ebpf_insn:jgt_reg(4, 3, 2),
+        %% DROP
+        ebpf_insn:mov64_imm(0, 1),
         ebpf_insn:exit_insn(),
-        ebpf_insn:mov64_imm(0, 2),    %% PASS
+        %% PASS
+        ebpf_insn:mov64_imm(0, 2),
         ebpf_insn:exit_insn()
     ]).
 
@@ -214,20 +249,28 @@ make_bounds_check_prog(N) ->
 make_ethertype_filter_prog() ->
     ebpf_insn:assemble([
         ebpf_insn:mov64_reg(6, 1),
-        ebpf_insn:ldxw(2, 6, 0),      %% R2 = ctx.data
-        ebpf_insn:ldxw(3, 6, 4),      %% R3 = ctx.data_end
+        %% R2 = ctx.data
+        ebpf_insn:ldxw(2, 6, 0),
+        %% R3 = ctx.data_end
+        ebpf_insn:ldxw(3, 6, 4),
         %% Bounds check: need at least 14 bytes (Ethernet header)
         ebpf_insn:mov64_reg(4, 2),
         ebpf_insn:add64_imm(4, 14),
-        ebpf_insn:jgt_reg(4, 3, 5),   %% too short → PASS (+5: skip to PASS)
+        %% too short → PASS (+5: skip to PASS)
+        ebpf_insn:jgt_reg(4, 3, 5),
         %% Read ethertype at offset 12
         ebpf_insn:ldxh(0, 2, 12),
-        ebpf_insn:be16(0),            %% network → host
+        %% network → host
+        ebpf_insn:be16(0),
         %% Check if 0x0800 (IPv4)
-        ebpf_insn:jne_imm(0, 16#0800, 2), %% not IPv4 → PASS (+2: skip to PASS)
-        ebpf_insn:mov64_imm(0, 1),    %% DROP (is IPv4)
+
+        %% not IPv4 → PASS (+2: skip to PASS)
+        ebpf_insn:jne_imm(0, 16#0800, 2),
+        %% DROP (is IPv4)
+        ebpf_insn:mov64_imm(0, 1),
         ebpf_insn:exit_insn(),
-        ebpf_insn:mov64_imm(0, 2),    %% PASS
+        %% PASS
+        ebpf_insn:mov64_imm(0, 2),
         ebpf_insn:exit_insn()
     ]).
 
@@ -260,12 +303,16 @@ assert_xval_xdp(Prog, Pkt, Expected) ->
     %% Erlang VM: construct XDP context
     PktBase = ?VM_PACKET_BASE,
     PktLen = byte_size(Pkt),
-    Ctx = <<PktBase:32/little,
-            (PktBase + PktLen):32/little,
-            0:32/little,     %% data_meta
-            0:32/little,     %% ingress_ifindex
-            0:32/little,     %% rx_queue_index
-            0:32/little>>,   %% egress_ifindex
+    Ctx =
+        <<PktBase:32/little, (PktBase + PktLen):32/little,
+            %% data_meta
+            0:32/little,
+            %% ingress_ifindex
+            0:32/little,
+            %% rx_queue_index
+            0:32/little,
+            %% egress_ifindex
+            0:32/little>>,
     ErlResult = ebpf_vm:run(Prog, #{ctx => Ctx, packet => Pkt}),
     ?assertEqual({ok, Expected}, ErlResult),
     %% uBPF: use run_xdp which constructs xdp_md in C

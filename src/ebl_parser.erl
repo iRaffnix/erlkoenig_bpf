@@ -1,13 +1,31 @@
-%% @doc EBL recursive-descent parser with Pratt-style precedence climbing.
 %%
-%% Parses a token list from ebl_lexer into an AST defined in ebl_ast.hrl.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_parser).
+-moduledoc """
+EBL recursive-descent parser with Pratt-style precedence climbing.
+
+Parses a token list from ebl_lexer into an AST defined in ebl_ast.hrl.
+""".
 
 -include("ebl_ast.hrl").
 
 -export([parse/1]).
 
-%% @doc Parse a complete EBL program from tokens.
+-doc "Parse a complete EBL program from tokens.".
 -spec parse({ok, [tuple()]} | [tuple()]) -> {ok, #program{}} | {error, term()}.
 parse({ok, Tokens}) ->
     parse(Tokens);
@@ -37,11 +55,15 @@ parse_program(Tokens) ->
     {Decls, T8} = parse_decls(T7, [], [], [], []),
     T9 = skip_newlines(T8),
     T10 = expect_token(end_kw, T9),
-    Prog = #program{type = ProgType, name = Name, direction = Dir,
-                    types = lists:reverse(element(1, Decls)),
-                    maps = lists:reverse(element(2, Decls)),
-                    consts = lists:reverse(element(3, Decls)),
-                    fns = lists:reverse(element(4, Decls))},
+    Prog = #program{
+        type = ProgType,
+        name = Name,
+        direction = Dir,
+        types = lists:reverse(element(1, Decls)),
+        maps = lists:reverse(element(2, Decls)),
+        consts = lists:reverse(element(3, Decls)),
+        fns = lists:reverse(element(4, Decls))
+    },
     {Prog, T10}.
 
 parse_decls(Tokens, Types, Maps, Consts, Fns) ->
@@ -82,13 +104,15 @@ parse_type_decl([{token, type_kw, _, L, C} | T]) ->
 parse_fields(Tokens, Acc) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        end_kw -> {Acc, T};
+        end_kw ->
+            {Acc, T};
         ident ->
             {FName, T2} = expect_ident(T),
             T3 = expect_token(colon, T2),
             {FType, T4} = parse_type_expr(skip_newlines(T3)),
             parse_fields(T4, [{FName, FType} | Acc]);
-        _ -> {Acc, T}
+        _ ->
+            {Acc, T}
     end.
 
 %%% ===================================================================
@@ -112,8 +136,17 @@ parse_map_decl([{token, map_kw, _, L, C} | T]) ->
     T14 = expect_ident_value(T13, <<"max_entries">>),
     T15 = expect_token(colon, T14),
     {MaxE, T16} = expect_integer(T15),
-    {#map_decl{name = Name, kind = Kind, key_type = KeyType,
-               value_type = ValType, max_entries = MaxE, loc = {L, C}}, T16}.
+    {
+        #map_decl{
+            name = Name,
+            kind = Kind,
+            key_type = KeyType,
+            value_type = ValType,
+            max_entries = MaxE,
+            loc = {L, C}
+        },
+        T16
+    }.
 
 %%% ===================================================================
 %%% Const declarations
@@ -143,22 +176,32 @@ parse_fn_decl([{token, fn_kw, _, L, C} | T]) ->
     T8 = skip_newlines(T7),
     {Body, T9} = parse_stmts(T8),
     T10 = expect_token(end_kw, skip_newlines(T9)),
-    {#fn_decl{name = Name, params = lists:reverse(Params),
-              ret_type = RetType, body = Body, loc = {L, C}}, T10}.
+    {
+        #fn_decl{
+            name = Name,
+            params = lists:reverse(Params),
+            ret_type = RetType,
+            body = Body,
+            loc = {L, C}
+        },
+        T10
+    }.
 
 parse_params(Tokens, Acc) ->
     case peek_type(Tokens) of
-        rparen -> {Acc, Tokens};
+        rparen ->
+            {Acc, Tokens};
         _ ->
             {Name, T2} = expect_ident(Tokens),
-            {Type, T3} = case peek_type(T2) of
-                colon ->
-                    T2b = expect_token(colon, T2),
-                    {Ty, T2c} = parse_type_expr(T2b),
-                    {Ty, T2c};
-                _ ->
-                    {undefined, T2}
-            end,
+            {Type, T3} =
+                case peek_type(T2) of
+                    colon ->
+                        T2b = expect_token(colon, T2),
+                        {Ty, T2c} = parse_type_expr(T2b),
+                        {Ty, T2c};
+                    _ ->
+                        {undefined, T2}
+                end,
             case peek_type(T3) of
                 comma -> parse_params(tl(T3), [{Name, Type} | Acc]);
                 _ -> {[{Name, Type} | Acc], T3}
@@ -184,10 +227,14 @@ parse_stmts(Tokens) ->
 parse_stmts(Tokens, Acc) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        end_kw -> {lists:reverse(Acc), T};
-        else_kw -> {lists:reverse(Acc), T};
-        elif_kw -> {lists:reverse(Acc), T};
-        eof -> {lists:reverse(Acc), T};
+        end_kw ->
+            {lists:reverse(Acc), T};
+        else_kw ->
+            {lists:reverse(Acc), T};
+        elif_kw ->
+            {lists:reverse(Acc), T};
+        eof ->
+            {lists:reverse(Acc), T};
         _ ->
             {Stmt, T2} = parse_stmt(T),
             parse_stmts(T2, [Stmt | Acc])
@@ -196,11 +243,16 @@ parse_stmts(Tokens, Acc) ->
 parse_stmt(Tokens) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        let_kw    -> parse_let(T);
-        if_kw     -> parse_if(T);
-        for_kw    -> parse_for(T);
-        match_kw  -> parse_match(T);
-        return_kw -> parse_return(T);
+        let_kw ->
+            parse_let(T);
+        if_kw ->
+            parse_if(T);
+        for_kw ->
+            parse_for(T);
+        match_kw ->
+            parse_match(T);
+        return_kw ->
+            parse_return(T);
         break_kw ->
             [{token, _, _, L, C} | T2] = T,
             {{break_stmt, {L, C}}, T2};
@@ -213,13 +265,15 @@ parse_stmt(Tokens) ->
 
 parse_let([{token, let_kw, _, L, C} | T]) ->
     {Pat, T2} = parse_pattern(T),
-    T3 = case peek_type(T2) of
-        colon ->
-            T2b = expect_token(colon, T2),
-            {_Type, T2c} = parse_type_expr(T2b),
-            T2c;
-        _ -> T2
-    end,
+    T3 =
+        case peek_type(T2) of
+            colon ->
+                T2b = expect_token(colon, T2),
+                {_Type, T2c} = parse_type_expr(T2b),
+                T2c;
+            _ ->
+                T2
+        end,
     T4 = expect_token(eq, T3),
     {Expr, T5} = parse_expr(skip_newlines(T4)),
     {{let_stmt, Pat, Expr, {L, C}}, T5}.
@@ -253,10 +307,11 @@ parse_else(Tokens) ->
             [_ | T2] = T,
             T3 = skip_newlines(T2),
             %% else can have optional do
-            T4 = case peek_type(T3) of
-                do_kw -> tl(T3);
-                _ -> T3
-            end,
+            T4 =
+                case peek_type(T3) of
+                    do_kw -> tl(T3);
+                    _ -> T3
+                end,
             parse_stmts(skip_newlines(T4));
         _ ->
             {[], T}
@@ -267,16 +322,18 @@ parse_for([{token, for_kw, _, L, C} | T]) ->
     T3 = expect_token(in_kw, T2),
     {FromExpr, T4} = parse_expr(T3),
     %% expect .. or ..=
-    {Inclusive, T5} = case peek_type(T4) of
-        dotdoteq -> {true, tl(T4)};
-        dotdot   -> {false, tl(T4)};
-        _ -> parse_error(expected_range_op, T4)
-    end,
+    {Inclusive, T5} =
+        case peek_type(T4) of
+            dotdoteq -> {true, tl(T4)};
+            dotdot -> {false, tl(T4)};
+            _ -> parse_error(expected_range_op, T4)
+        end,
     {ToExpr0, T6} = parse_expr(T5),
-    ToExpr = case Inclusive of
-        true -> {binop, '+', ToExpr0, {integer_lit, 1, {0,0}}, {0,0}};
-        false -> ToExpr0
-    end,
+    ToExpr =
+        case Inclusive of
+            true -> {binop, '+', ToExpr0, {integer_lit, 1, {0, 0}}, {0, 0}};
+            false -> ToExpr0
+        end,
     T7 = expect_token(do_kw, skip_newlines(T6)),
     {Body, T8} = parse_stmts(skip_newlines(T7)),
     T9 = expect_token(end_kw, skip_newlines(T8)),
@@ -292,29 +349,34 @@ parse_match([{token, match_kw, _, L, C} | T]) ->
 parse_match_arms(Tokens, Acc) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        end_kw -> {Acc, T};
+        end_kw ->
+            {Acc, T};
         _ ->
             {Pat, T2} = parse_pattern(T),
             T3 = expect_token(arrow, T2),
-            {Body, T4} = case peek_type(skip_newlines(T3)) of
-                do_kw ->
-                    T3b = expect_token(do_kw, skip_newlines(T3)),
-                    {B, T3c} = parse_stmts(skip_newlines(T3b)),
-                    T3d = expect_token(end_kw, skip_newlines(T3c)),
-                    {B, T3d};
-                _ ->
-                    {S, T3b} = parse_stmt(skip_newlines(T3)),
-                    {[S], T3b}
-            end,
+            {Body, T4} =
+                case peek_type(skip_newlines(T3)) of
+                    do_kw ->
+                        T3b = expect_token(do_kw, skip_newlines(T3)),
+                        {B, T3c} = parse_stmts(skip_newlines(T3b)),
+                        T3d = expect_token(end_kw, skip_newlines(T3c)),
+                        {B, T3d};
+                    _ ->
+                        {S, T3b} = parse_stmt(skip_newlines(T3)),
+                        {[S], T3b}
+                end,
             parse_match_arms(T4, [{Pat, Body} | Acc])
     end.
 
 parse_return([{token, return_kw, _, L, C} | T]) ->
     T2 = skip_newlines(T),
     case peek_type(T2) of
-        newline -> {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
-        end_kw -> {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
-        eof -> {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
+        newline ->
+            {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
+        end_kw ->
+            {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
+        eof ->
+            {{return_stmt, {integer_lit, 0, {L, C}}, {L, C}}, T2};
         _ ->
             {Expr, T3} = parse_expr(T2),
             {{return_stmt, Expr, {L, C}}, T3}
@@ -372,24 +434,24 @@ parse_prec_loop(Left, Tokens, Level) ->
 
 peek_binop(Tokens, Level) ->
     case peek_type(Tokens) of
-        or_or     when Level =:= 2  -> {ok, '||', tl(Tokens)};
-        and_and   when Level =:= 3  -> {ok, '&&', tl(Tokens)};
-        pipe_op   when Level =:= 4  -> {ok, '|', tl(Tokens)};
-        caret     when Level =:= 5  -> {ok, '^', tl(Tokens)};
-        ampersand when Level =:= 6  -> {ok, '&', tl(Tokens)};
-        eq_eq     when Level =:= 7  -> {ok, '==', tl(Tokens)};
-        bang_eq   when Level =:= 7  -> {ok, '!=', tl(Tokens)};
-        lt        when Level =:= 8  -> {ok, '<', tl(Tokens)};
-        gt        when Level =:= 8  -> {ok, '>', tl(Tokens)};
-        lt_eq     when Level =:= 8  -> {ok, '<=', tl(Tokens)};
-        gt_eq     when Level =:= 8  -> {ok, '>=', tl(Tokens)};
-        lshift    when Level =:= 9  -> {ok, '<<', tl(Tokens)};
-        rshift    when Level =:= 9  -> {ok, '>>', tl(Tokens)};
-        plus      when Level =:= 10 -> {ok, '+', tl(Tokens)};
-        minus     when Level =:= 10 -> {ok, '-', tl(Tokens)};
-        star      when Level =:= 11 -> {ok, '*', tl(Tokens)};
-        slash     when Level =:= 11 -> {ok, '/', tl(Tokens)};
-        percent   when Level =:= 11 -> {ok, '%', tl(Tokens)};
+        or_or when Level =:= 2 -> {ok, '||', tl(Tokens)};
+        and_and when Level =:= 3 -> {ok, '&&', tl(Tokens)};
+        pipe_op when Level =:= 4 -> {ok, '|', tl(Tokens)};
+        caret when Level =:= 5 -> {ok, '^', tl(Tokens)};
+        ampersand when Level =:= 6 -> {ok, '&', tl(Tokens)};
+        eq_eq when Level =:= 7 -> {ok, '==', tl(Tokens)};
+        bang_eq when Level =:= 7 -> {ok, '!=', tl(Tokens)};
+        lt when Level =:= 8 -> {ok, '<', tl(Tokens)};
+        gt when Level =:= 8 -> {ok, '>', tl(Tokens)};
+        lt_eq when Level =:= 8 -> {ok, '<=', tl(Tokens)};
+        gt_eq when Level =:= 8 -> {ok, '>=', tl(Tokens)};
+        lshift when Level =:= 9 -> {ok, '<<', tl(Tokens)};
+        rshift when Level =:= 9 -> {ok, '>>', tl(Tokens)};
+        plus when Level =:= 10 -> {ok, '+', tl(Tokens)};
+        minus when Level =:= 10 -> {ok, '-', tl(Tokens)};
+        star when Level =:= 11 -> {ok, '*', tl(Tokens)};
+        slash when Level =:= 11 -> {ok, '/', tl(Tokens)};
+        percent when Level =:= 11 -> {ok, '%', tl(Tokens)};
         _ -> none
     end.
 
@@ -498,7 +560,8 @@ parse_primary(Tokens) ->
 
 parse_args(Tokens, Acc) ->
     case peek_type(Tokens) of
-        rparen -> {lists:reverse(Acc), Tokens};
+        rparen ->
+            {lists:reverse(Acc), Tokens};
         _ ->
             {Expr, T2} = parse_expr(Tokens),
             case peek_type(T2) of
@@ -510,16 +573,18 @@ parse_args(Tokens, Acc) ->
 parse_struct_fields(Tokens, Acc) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        rbrace -> {Acc, T};
+        rbrace ->
+            {Acc, T};
         _ ->
             {FName, T2} = expect_ident(T),
             T3 = expect_token(colon, T2),
             {FExpr, T4} = parse_expr(skip_newlines(T3)),
             T5 = skip_newlines(T4),
-            T6 = case peek_type(T5) of
-                comma -> tl(T5);
-                _ -> T5
-            end,
+            T6 =
+                case peek_type(T5) of
+                    comma -> tl(T5);
+                    _ -> T5
+                end,
             parse_struct_fields(T6, [{FName, FExpr} | Acc])
     end.
 
@@ -561,15 +626,17 @@ parse_pattern(Tokens) ->
 parse_pat_fields(Tokens, Acc) ->
     T = skip_newlines(Tokens),
     case peek_type(T) of
-        rbrace -> {Acc, T};
+        rbrace ->
+            {Acc, T};
         _ ->
             {FName, T2} = expect_ident(T),
             T3 = expect_token(colon, T2),
             {FPat, T4} = parse_pattern(T3),
-            T5 = case peek_type(T4) of
-                comma -> tl(T4);
-                _ -> T4
-            end,
+            T5 =
+                case peek_type(T4) of
+                    comma -> tl(T4);
+                    _ -> T4
+                end,
             parse_pat_fields(T5, [{FName, FPat} | Acc])
     end.
 
@@ -579,15 +646,15 @@ parse_pat_fields(Tokens, Acc) ->
 
 parse_type_expr(Tokens) ->
     case Tokens of
-        [{token, u8_kw, _, _, _} | T]     -> {{prim, u8}, T};
-        [{token, u16_kw, _, _, _} | T]    -> {{prim, u16}, T};
-        [{token, u32_kw, _, _, _} | T]    -> {{prim, u32}, T};
-        [{token, u64_kw, _, _, _} | T]    -> {{prim, u64}, T};
-        [{token, i8_kw, _, _, _} | T]     -> {{prim, i8}, T};
-        [{token, i16_kw, _, _, _} | T]    -> {{prim, i16}, T};
-        [{token, i32_kw, _, _, _} | T]    -> {{prim, i32}, T};
-        [{token, i64_kw, _, _, _} | T]    -> {{prim, i64}, T};
-        [{token, bool_kw, _, _, _} | T]   -> {{prim, bool}, T};
+        [{token, u8_kw, _, _, _} | T] -> {{prim, u8}, T};
+        [{token, u16_kw, _, _, _} | T] -> {{prim, u16}, T};
+        [{token, u32_kw, _, _, _} | T] -> {{prim, u32}, T};
+        [{token, u64_kw, _, _, _} | T] -> {{prim, u64}, T};
+        [{token, i8_kw, _, _, _} | T] -> {{prim, i8}, T};
+        [{token, i16_kw, _, _, _} | T] -> {{prim, i16}, T};
+        [{token, i32_kw, _, _, _} | T] -> {{prim, i32}, T};
+        [{token, i64_kw, _, _, _} | T] -> {{prim, i64}, T};
+        [{token, bool_kw, _, _, _} | T] -> {{prim, bool}, T};
         [{token, action_kw, _, _, _} | T] -> {{prim, action}, T};
         [{token, type_ident, Name, _, _} | T] -> {{named, Name}, T};
         [{token, ident, Name, _, _} | T] -> {{named, Name}, T};
@@ -605,8 +672,7 @@ skip_newlines([{token, newline, _, _, _} | T]) -> skip_newlines(T);
 skip_newlines(T) -> T.
 
 expect_token(Type, [{token, Type, _, _, _} | T]) -> T;
-expect_token(Expected, Tokens) ->
-    parse_error({expected, Expected, got, peek_type(Tokens)}, Tokens).
+expect_token(Expected, Tokens) -> parse_error({expected, Expected, got, peek_type(Tokens)}, Tokens).
 
 expect_ident([{token, ident, Name, _, _} | T]) -> {Name, T};
 expect_ident([{token, type_ident, Name, _, _} | T]) -> {Name, T};
@@ -621,25 +687,26 @@ expect_atom_lit(Tokens) -> parse_error({expected_atom, peek_type(Tokens)}, Token
 expect_integer([{token, integer_lit, Val, _, _} | T]) -> {Val, T};
 expect_integer(Tokens) -> parse_error({expected_integer, peek_type(Tokens)}, Tokens).
 
-expect_ident_value([{token, ident, Expected, _, _} | T], Expected) -> T;
+expect_ident_value([{token, ident, Expected, _, _} | T], Expected) ->
+    T;
 expect_ident_value(Tokens, Expected) ->
     parse_error({expected_ident, Expected, got, peek_type(Tokens)}, Tokens).
 
-expect_prog_type([{token, xdp_kw, _, _, _} | T])    -> {xdp, T};
-expect_prog_type([{token, tc_kw, _, _, _} | T])     -> {tc, T};
+expect_prog_type([{token, xdp_kw, _, _, _} | T]) -> {xdp, T};
+expect_prog_type([{token, tc_kw, _, _, _} | T]) -> {tc, T};
 expect_prog_type([{token, cgroup_kw, _, _, _} | T]) -> {cgroup, T};
 expect_prog_type([{token, socket_kw, _, _, _} | T]) -> {socket, T};
 expect_prog_type(Tokens) -> parse_error({expected_prog_type, peek_type(Tokens)}, Tokens).
 
-expect_map_kind([{token, hash_kw, _, _, _} | T])           -> {hash, T};
-expect_map_kind([{token, array_kw, _, _, _} | T])          -> {array, T};
-expect_map_kind([{token, lru_hash_kw, _, _, _} | T])       -> {lru_hash, T};
-expect_map_kind([{token, percpu_hash_kw, _, _, _} | T])    -> {percpu_hash, T};
-expect_map_kind([{token, percpu_array_kw, _, _, _} | T])   -> {percpu_array, T};
+expect_map_kind([{token, hash_kw, _, _, _} | T]) -> {hash, T};
+expect_map_kind([{token, array_kw, _, _, _} | T]) -> {array, T};
+expect_map_kind([{token, lru_hash_kw, _, _, _} | T]) -> {lru_hash, T};
+expect_map_kind([{token, percpu_hash_kw, _, _, _} | T]) -> {percpu_hash, T};
+expect_map_kind([{token, percpu_array_kw, _, _, _} | T]) -> {percpu_array, T};
 expect_map_kind([{token, lru_percpu_hash_kw, _, _, _} | T]) -> {lru_percpu_hash, T};
-expect_map_kind([{token, ringbuf_kw, _, _, _} | T])        -> {ringbuf, T};
-expect_map_kind([{token, devmap_hash_kw, _, _, _} | T])    -> {devmap_hash, T};
-expect_map_kind([{token, prog_array_kw, _, _, _} | T])     -> {prog_array, T};
+expect_map_kind([{token, ringbuf_kw, _, _, _} | T]) -> {ringbuf, T};
+expect_map_kind([{token, devmap_hash_kw, _, _, _} | T]) -> {devmap_hash, T};
+expect_map_kind([{token, prog_array_kw, _, _, _} | T]) -> {prog_array, T};
 expect_map_kind(Tokens) -> parse_error({expected_map_kind, peek_type(Tokens)}, Tokens).
 
 maybe_direction(Tokens) ->

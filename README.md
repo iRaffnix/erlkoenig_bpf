@@ -112,7 +112,7 @@ EBL features:
 | Compiler Explorer (Web UI) | Complete |
 | Kernel Bridge (`bpf()` syscall, XDP attach) | **Not yet implemented** |
 
-**921 tests, 0 failures, 0 Dialyzer warnings.**
+**920 tests, 0 failures, 0 Dialyzer warnings.**
 
 ## Scope
 
@@ -131,14 +131,14 @@ BPF toolchain.
 
 ### Prerequisites
 
-- Erlang/OTP >= 27
-- Elixir >= 1.17 (for the DSL)
+- Erlang/OTP >= 28
+- Elixir >= 1.18 (for the DSL)
 
 ### Build & Test
 
 ```bash
 rebar3 compile
-rebar3 eunit        # 918 tests
+rebar3 eunit        # 920 tests
 rebar3 dialyzer     # 0 warnings
 ```
 
@@ -225,7 +225,7 @@ Elixir DSL          EBL Source
 
 ```
 src/             25 Erlang modules — compiler + VM + explorer
-test/            24 test modules (918 tests)
+test/            24 test modules (920 tests)
 c_src/           C port bridge to uBPF
 include/         Header files (AST, IR, opcodes, VM records)
 dsl/             Elixir DSL (use ErlkoenigEbpfDsl.XDP)

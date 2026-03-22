@@ -1,8 +1,26 @@
-%% @doc IR → BPF bytecode generation.
 %%
-%% Two-pass approach with register assignment from regalloc.
-%% Supports spilled registers via R10 stack slots with R5 as scratch.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_codegen).
+-moduledoc """
+IR to BPF bytecode generation.
+
+Two-pass approach with register assignment from regalloc.
+Supports spilled registers via R10 stack slots with R5 as scratch.
+""".
 
 -include("ebpf_ir.hrl").
 
@@ -11,31 +29,36 @@
 -define(JA_PH(Target), {ja_ph, Target}).
 -define(JEQ_PH(Reg, TrueL, FalseL), {jeq_ph, Reg, TrueL, FalseL}).
 -define(JCMP_PH(CmpOp, L, R, TrueL, FalseL), {jcmp_ph, CmpOp, L, R, TrueL, FalseL}).
--define(SCRATCH, 5).  %% R5 used as scratch for spill/reload
+%% R5 used as scratch for spill/reload
+-define(SCRATCH, 5).
 
-%% @doc Generate BPF bytecode with default register mapping, no spills.
+-doc "Generate BPF bytecode with default register mapping, no spills.".
 codegen(Prog) ->
     codegen(Prog, #{}, #{}).
 
-%% @doc Generate BPF bytecode with register map, no spills.
+-doc "Generate BPF bytecode with register map, no spills.".
 codegen(Prog, RegMap) ->
     codegen(Prog, RegMap, #{}).
 
-%% @doc Generate BPF bytecode with register map and spill map.
+-doc "Generate BPF bytecode with register map and spill map.".
 codegen(#ir_program{entry = Entry, blocks = Blocks}, RegMap, SpillMap) ->
     Ctx = #{regmap => RegMap, spillmap => SpillMap},
     Order = linearize(Entry, Blocks),
     %% Emit mov r6, r1 prolog: save ctx pointer to callee-saved register
     Prolog = [ebpf_insn:mov64_reg(6, 1)],
     PrologLen = length(Prolog),
-    {RevInsns, BlockStarts, _} = lists:foldl(fun(Label, {Acc, Starts, Idx}) ->
-        Block = maps:get(Label, Blocks),
-        BodyInsns = emit_body(Block#ir_block.instrs, Ctx),
-        TermInsns = emit_term_ph(Block#ir_block.term, Ctx),
-        All = BodyInsns ++ TermInsns,
-        Len = insn_slot_count(All),
-        {lists:reverse(All) ++ Acc, Starts#{Label => Idx}, Idx + Len}
-    end, {[], #{}, PrologLen}, Order),
+    {RevInsns, BlockStarts, _} = lists:foldl(
+        fun(Label, {Acc, Starts, Idx}) ->
+            Block = maps:get(Label, Blocks),
+            BodyInsns = emit_body(Block#ir_block.instrs, Ctx),
+            TermInsns = emit_term_ph(Block#ir_block.term, Ctx),
+            All = BodyInsns ++ TermInsns,
+            Len = insn_slot_count(All),
+            {lists:reverse(All) ++ Acc, Starts#{Label => Idx}, Idx + Len}
+        end,
+        {[], #{}, PrologLen},
+        Order
+    ),
     AllInsns = Prolog ++ lists:reverse(RevInsns),
     Patched = patch(AllInsns, 0, BlockStarts, Ctx),
     ebpf_insn:assemble(Patched).
@@ -51,13 +74,18 @@ linearize_bfs([], _Visited, _Blocks, Acc) ->
     lists:reverse(Acc);
 linearize_bfs([Label | Rest], Visited, Blocks, Acc) ->
     case maps:is_key(Label, Visited) of
-        true -> linearize_bfs(Rest, Visited, Blocks, Acc);
+        true ->
+            linearize_bfs(Rest, Visited, Blocks, Acc);
         false ->
             case maps:find(Label, Blocks) of
                 {ok, Block} ->
                     Succs = terminator_succs(Block#ir_block.term),
-                    linearize_bfs(Rest ++ Succs, Visited#{Label => true},
-                                  Blocks, [Label | Acc]);
+                    linearize_bfs(
+                        Rest ++ Succs,
+                        Visited#{Label => true},
+                        Blocks,
+                        [Label | Acc]
+                    );
                 error ->
                     linearize_bfs(Rest, Visited#{Label => true}, Blocks, Acc)
             end
@@ -87,82 +115,116 @@ emit_instr_spill(#ir_instr{op = call_helper, dst = Dst, args = [{fn, Name} | Arg
     Numbered = lists:zip(lists:seq(1, length(ArgRegs)), ArgRegs),
     {SpilledPairs, NonSpilledPairs} = lists:partition(
         fun({_, Arg}) -> is_vreg(Arg) andalso maps:is_key(Arg, SM) end,
-        Numbered),
+        Numbered
+    ),
     %% Non-spilled args: use parallel_move (handles register-to-register)
-    NonSpilledMoves = [{R, case is_integer(A) of true -> {imm, A}; false -> phys(A, Ctx) end}
-                       || {R, A} <- NonSpilledPairs],
+    NonSpilledMoves = [
+        {R,
+            case is_integer(A) of
+                true -> {imm, A};
+                false -> phys(A, Ctx)
+            end}
+     || {R, A} <- NonSpilledPairs
+    ],
     FilteredMoves = [{D, S} || {D, S} <- NonSpilledMoves, not is_identity(D, S)],
     ParallelMovs = parallel_move(FilteredMoves),
     %% Spilled args: load from stack directly into target register.
     %% Must come AFTER parallel_move to avoid clobbering sources.
-    SpilledLoads = [ebpf_insn:ldxdw(R, 10, maps:get(A, SM))
-                    || {R, A} <- SpilledPairs],
+    SpilledLoads = [
+        ebpf_insn:ldxdw(R, 10, maps:get(A, SM))
+     || {R, A} <- SpilledPairs
+    ],
     %% Call instruction
     CallInsn = ebpf_insn:call(HelperId),
     %% Move result from R0 into destination
-    PDst = case DstSpilled of true -> ?SCRATCH; false -> phys(Dst, Ctx) end,
-    ResultMov = case PDst of 0 -> []; _ -> [ebpf_insn:mov64_reg(PDst, 0)] end,
-    Stores = case DstSpilled of
-        true -> [ebpf_insn:stxdw(10, maps:get(Dst, SM), ?SCRATCH)];
-        false -> []
-    end,
+    PDst =
+        case DstSpilled of
+            true -> ?SCRATCH;
+            false -> phys(Dst, Ctx)
+        end,
+    ResultMov =
+        case PDst of
+            0 -> [];
+            _ -> [ebpf_insn:mov64_reg(PDst, 0)]
+        end,
+    Stores =
+        case DstSpilled of
+            true -> [ebpf_insn:stxdw(10, maps:get(Dst, SM), ?SCRATCH)];
+            false -> []
+        end,
     ParallelMovs ++ SpilledLoads ++ [CallInsn] ++ ResultMov ++ Stores;
 emit_instr_spill(#ir_instr{dst = Dst, args = Args} = I, Ctx) ->
     SM = maps:get(spillmap, Ctx),
     DstSpilled = is_vreg(Dst) andalso maps:is_key(Dst, SM),
     %% Count spilled args
-    SpilledArgs = [{Idx, A} || {Idx, A} <- lists:zip(lists:seq(1, length(Args)), Args),
-                               is_vreg(A), maps:is_key(A, SM)],
+    SpilledArgs = [
+        {Idx, A}
+     || {Idx, A} <- lists:zip(lists:seq(1, length(Args)), Args),
+        is_vreg(A),
+        maps:is_key(A, SM)
+    ],
     NumSpilled = length(SpilledArgs),
     %% Reload first spilled arg (for standard path)
-    Reloads = lists:flatmap(fun({_, SA}) ->
-        Off = maps:get(SA, SM),
-        [ebpf_insn:ldxdw(?SCRATCH, 10, Off)]
-    end, lists:sublist(SpilledArgs, 1)),
-    Result = case {DstSpilled, NumSpilled, I#ir_instr.op, Args} of
-        %% Dst spilled + 2nd arg spilled: R5 conflict!
-        %% mov R5, phys(A1) would clobber the reloaded 2nd arg in R5.
-        {true, 1, Op, [A1, A2]} when Op =/= mov ->
-            case is_vreg(A2) andalso maps:is_key(A2, SM) of
-                true ->
-                    %% 2nd arg is the spilled one → R5 conflict
-                    A2Off = maps:get(A2, SM),
-                    PA1 = phys(A1, Ctx),
-                    [ebpf_insn:ldxdw(?SCRATCH, 10, A2Off) |
-                     emit_spilled_dst_alu(Op, PA1, ?SCRATCH)];
-                false ->
-                    %% 1st arg is spilled → mov R5,R5 is no-op, safe
-                    Reloads ++ emit_instr(I, Ctx)
-            end;
-        %% Both args spilled + dst spilled: use R0 as second scratch
-        {true, N, Op, [A1, A2]} when N >= 2, Op =/= mov ->
-            A1Off = maps:get(A1, SM),
-            A2Off = maps:get(A2, SM),
-            [ebpf_insn:ldxdw(?SCRATCH, 10, A1Off),
-             ebpf_insn:mov64_reg(0, ?SCRATCH),
-             ebpf_insn:ldxdw(?SCRATCH, 10, A2Off)
-             | emit_alu_op(Op, 0, ?SCRATCH)]
-            ++ [ebpf_insn:mov64_reg(?SCRATCH, 0)];
-        %% Both args spilled, dst NOT spilled
-        {false, N, Op, [A1, A2]} when N >= 2, Op =/= mov ->
-            Off1 = maps:get(A1, SM),
-            Off2 = maps:get(A2, SM),
-            PDst = phys(Dst, Ctx),
-            [ebpf_insn:ldxdw(?SCRATCH, 10, Off1),
-             ebpf_insn:mov64_reg(PDst, ?SCRATCH),
-             ebpf_insn:ldxdw(?SCRATCH, 10, Off2)
-             | emit_alu_op(Op, PDst, ?SCRATCH)];
-        %% Standard path: no R5 conflict
-        _ ->
-            Reloads ++ emit_instr(I, Ctx)
-    end,
+    Reloads = lists:flatmap(
+        fun({_, SA}) ->
+            Off = maps:get(SA, SM),
+            [ebpf_insn:ldxdw(?SCRATCH, 10, Off)]
+        end,
+        lists:sublist(SpilledArgs, 1)
+    ),
+    Result =
+        case {DstSpilled, NumSpilled, I#ir_instr.op, Args} of
+            %% Dst spilled + 2nd arg spilled: R5 conflict!
+            %% mov R5, phys(A1) would clobber the reloaded 2nd arg in R5.
+            {true, 1, Op, [A1, A2]} when Op =/= mov ->
+                case is_vreg(A2) andalso maps:is_key(A2, SM) of
+                    true ->
+                        %% 2nd arg is the spilled one → R5 conflict
+                        A2Off = maps:get(A2, SM),
+                        PA1 = phys(A1, Ctx),
+                        [
+                            ebpf_insn:ldxdw(?SCRATCH, 10, A2Off)
+                            | emit_spilled_dst_alu(Op, PA1, ?SCRATCH)
+                        ];
+                    false ->
+                        %% 1st arg is spilled → mov R5,R5 is no-op, safe
+                        Reloads ++ emit_instr(I, Ctx)
+                end;
+            %% Both args spilled + dst spilled: use R0 as second scratch
+            {true, N, Op, [A1, A2]} when N >= 2, Op =/= mov ->
+                A1Off = maps:get(A1, SM),
+                A2Off = maps:get(A2, SM),
+                [
+                    ebpf_insn:ldxdw(?SCRATCH, 10, A1Off),
+                    ebpf_insn:mov64_reg(0, ?SCRATCH),
+                    ebpf_insn:ldxdw(?SCRATCH, 10, A2Off)
+                    | emit_alu_op(Op, 0, ?SCRATCH)
+                ] ++
+                    [ebpf_insn:mov64_reg(?SCRATCH, 0)];
+            %% Both args spilled, dst NOT spilled
+            {false, N, Op, [A1, A2]} when N >= 2, Op =/= mov ->
+                Off1 = maps:get(A1, SM),
+                Off2 = maps:get(A2, SM),
+                PDst = phys(Dst, Ctx),
+                [
+                    ebpf_insn:ldxdw(?SCRATCH, 10, Off1),
+                    ebpf_insn:mov64_reg(PDst, ?SCRATCH),
+                    ebpf_insn:ldxdw(?SCRATCH, 10, Off2)
+                    | emit_alu_op(Op, PDst, ?SCRATCH)
+                ];
+            %% Standard path: no R5 conflict
+            _ ->
+                Reloads ++ emit_instr(I, Ctx)
+        end,
     %% Store spilled dst after the instruction
-    Stores = case DstSpilled of
-        true ->
-            DstOff = maps:get(Dst, SM),
-            [ebpf_insn:stxdw(10, DstOff, ?SCRATCH)];
-        false -> []
-    end,
+    Stores =
+        case DstSpilled of
+            true ->
+                DstOff = maps:get(Dst, SM),
+                [ebpf_insn:stxdw(10, DstOff, ?SCRATCH)];
+            false ->
+                []
+        end,
     Result ++ Stores.
 
 %% Emit ALU for spilled-dst case: compute A1_phys op R5, result in R5.
@@ -174,9 +236,11 @@ emit_spilled_dst_alu(Op, PA1, Scratch) ->
             emit_alu_op(Op, Scratch, PA1);
         false ->
             %% Need PA1 op Scratch, result in Scratch
-            [ebpf_insn:mov64_reg(0, PA1) |
-             emit_alu_op(Op, 0, Scratch)]
-            ++ [ebpf_insn:mov64_reg(Scratch, 0)]
+            [
+                ebpf_insn:mov64_reg(0, PA1)
+                | emit_alu_op(Op, 0, Scratch)
+            ] ++
+                [ebpf_insn:mov64_reg(Scratch, 0)]
     end.
 
 is_commutative_alu(add) -> true;
@@ -190,95 +254,128 @@ emit_instr(#ir_instr{op = mov, dst = Dst, args = [Src]}, Ctx) when is_integer(Sr
     [ebpf_insn:mov64_imm(phys(Dst, Ctx), Src)];
 emit_instr(#ir_instr{op = mov, dst = Dst, args = [Src]}, Ctx) ->
     [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx))];
-
 emit_instr(#ir_instr{op = mov32, dst = Dst, args = [Src]}, Ctx) when is_integer(Src) ->
     [ebpf_insn:mov32_imm(phys(Dst, Ctx), Src)];
-
 emit_instr(#ir_instr{op = add, dst = Dst, args = [Src, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
-     ebpf_insn:add64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
+        ebpf_insn:add64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = add, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:add64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:add64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = sub, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:sub64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:sub64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = sub, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:sub64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:sub64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = mul, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:mul64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:mul64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = mul, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:mul64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:mul64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = 'div', dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:div64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:div64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = 'div', dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:div64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:div64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = mod, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:mod64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:mod64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = mod, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:mod64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:mod64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = and_op, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:and64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:and64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = and_op, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:and64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:and64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = or_op, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:or64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:or64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = or_op, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:or64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:or64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = xor_op, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:xor64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:xor64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = xor_op, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:xor64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:xor64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = lsh, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:lsh64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:lsh64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = lsh, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:lsh64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:lsh64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = rsh, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:rsh64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:rsh64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = rsh, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:rsh64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:rsh64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = arsh, dst = Dst, args = [A, Imm]}, Ctx) when is_integer(Imm) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:arsh64_imm(phys(Dst, Ctx), Imm)];
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:arsh64_imm(phys(Dst, Ctx), Imm)
+    ];
 emit_instr(#ir_instr{op = arsh, dst = Dst, args = [A, B]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
-     ebpf_insn:arsh64_reg(phys(Dst, Ctx), phys(B, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(A, Ctx)),
+        ebpf_insn:arsh64_reg(phys(Dst, Ctx), phys(B, Ctx))
+    ];
 emit_instr(#ir_instr{op = neg, dst = Dst, args = [Src]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
-     ebpf_insn:neg64(phys(Dst, Ctx))];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
+        ebpf_insn:neg64(phys(Dst, Ctx))
+    ];
 emit_instr(#ir_instr{op = not_op, dst = Dst, args = [Src]}, Ctx) ->
-    [ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
-     ebpf_insn:xor64_imm(phys(Dst, Ctx), 1)];
-
+    [
+        ebpf_insn:mov64_reg(phys(Dst, Ctx), phys(Src, Ctx)),
+        ebpf_insn:xor64_imm(phys(Dst, Ctx), 1)
+    ];
 emit_instr(#ir_instr{op = load, dst = Dst, args = [Base, {ctx_field, Offset, 4}]}, Ctx) ->
     %% 32-bit context field load: ldxw dst, [R6+offset]
     [ebpf_insn:ldxw(phys(Dst, Ctx), phys(Base, Ctx), Offset)];
@@ -299,29 +396,42 @@ emit_instr(#ir_instr{op = load, dst = Dst, args = [Base, {pkt_read, Offset, 2}]}
     [ebpf_insn:ldxh(phys(Dst, Ctx), phys(Base, Ctx), Offset)];
 emit_instr(#ir_instr{op = load, dst = Dst, args = [Base, {pkt_read, Offset, 4}]}, Ctx) ->
     [ebpf_insn:ldxw(phys(Dst, Ctx), phys(Base, Ctx), Offset)];
-
 emit_instr(#ir_instr{op = load, dst = Dst, args = [Base, _Field]}, Ctx) ->
     [ebpf_insn:ldxdw(phys(Dst, Ctx), phys(Base, Ctx), 0)];
-
-emit_instr(#ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 1}, Val]}, Ctx) ->
+emit_instr(
+    #ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 1}, Val]}, Ctx
+) ->
     [ebpf_insn:stxb(phys(Base, Ctx), Offset, phys(Val, Ctx))];
-emit_instr(#ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 2}, Val]}, Ctx) ->
+emit_instr(
+    #ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 2}, Val]}, Ctx
+) ->
     [ebpf_insn:stxh(phys(Base, Ctx), Offset, phys(Val, Ctx))];
-emit_instr(#ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 4}, Val]}, Ctx) ->
+emit_instr(
+    #ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 4}, Val]}, Ctx
+) ->
     [ebpf_insn:stxw(phys(Base, Ctx), Offset, phys(Val, Ctx))];
-emit_instr(#ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 8}, Val]}, Ctx) ->
+emit_instr(
+    #ir_instr{op = store, dst = none, args = [Base, {struct_field, _Name, Offset, 8}, Val]}, Ctx
+) ->
     [ebpf_insn:stxdw(phys(Base, Ctx), Offset, phys(Val, Ctx))];
-emit_instr(#ir_instr{op = store, dst = none, args = [Base, {stack_off, Off}, Val],
-                     type = {scalar, u32}}, Ctx) ->
+emit_instr(
+    #ir_instr{
+        op = store,
+        dst = none,
+        args = [Base, {stack_off, Off}, Val],
+        type = {scalar, u32}
+    },
+    Ctx
+) ->
     [ebpf_insn:stxw(phys(Base, Ctx), Off, phys(Val, Ctx))];
 emit_instr(#ir_instr{op = store, dst = none, args = [Base, {stack_off, Off}, Val]}, Ctx) ->
     [ebpf_insn:stxdw(phys(Base, Ctx), Off, phys(Val, Ctx))];
 emit_instr(#ir_instr{op = store, dst = none, args = [Base, _Off, Val]}, Ctx) ->
     [ebpf_insn:stxdw(phys(Base, Ctx), 0, phys(Val, Ctx))];
-
-emit_instr(#ir_instr{op = store_imm, dst = none, args = [Base, _Off, Imm]}, Ctx) when is_integer(Imm) ->
+emit_instr(#ir_instr{op = store_imm, dst = none, args = [Base, _Off, Imm]}, Ctx) when
+    is_integer(Imm)
+->
     [ebpf_insn:stdw(phys(Base, Ctx), 0, Imm)];
-
 emit_instr(#ir_instr{op = call_helper, dst = Dst, args = [{fn, Name} | ArgRegs]}, Ctx) ->
     HelperId = helper_id(Name),
     %% Move arguments into R1-R5 (BPF calling convention)
@@ -330,27 +440,31 @@ emit_instr(#ir_instr{op = call_helper, dst = Dst, args = [{fn, Name} | ArgRegs]}
     CallInsn = ebpf_insn:call(HelperId),
     %% Move result from R0 into destination register
     PDst = phys(Dst, Ctx),
-    ResultMov = case PDst of
-        0 -> [];  %% Already in R0
-        _ -> [ebpf_insn:mov64_reg(PDst, 0)]
-    end,
+    ResultMov =
+        case PDst of
+            %% Already in R0
+            0 -> [];
+            _ -> [ebpf_insn:mov64_reg(PDst, 0)]
+        end,
     ArgMovs ++ [CallInsn] ++ ResultMov;
-
 emit_instr(#ir_instr{op = ld_map_fd, dst = Dst, args = [Fd]}, Ctx) ->
     [ebpf_insn:ld_map_fd(phys(Dst, Ctx), Fd)];
-
 emit_instr(#ir_instr{op = endian_be, dst = Dst, args = [16]}, Ctx) ->
     [ebpf_insn:be16(phys(Dst, Ctx))];
 emit_instr(#ir_instr{op = endian_be, dst = Dst, args = [32]}, Ctx) ->
     [ebpf_insn:be32(phys(Dst, Ctx))];
 emit_instr(#ir_instr{op = endian_be, dst = Dst, args = [64]}, Ctx) ->
     [ebpf_insn:be64(phys(Dst, Ctx))];
-
-emit_instr(#ir_instr{op = nop}, _Ctx) -> [];
-emit_instr(#ir_instr{op = phi}, _Ctx) -> [];
-emit_instr(#ir_instr{op = bounds_check}, _Ctx) -> [];
-emit_instr(#ir_instr{op = null_check}, _Ctx) -> [];
-emit_instr(_, _Ctx) -> [].
+emit_instr(#ir_instr{op = nop}, _Ctx) ->
+    [];
+emit_instr(#ir_instr{op = phi}, _Ctx) ->
+    [];
+emit_instr(#ir_instr{op = bounds_check}, _Ctx) ->
+    [];
+emit_instr(#ir_instr{op = null_check}, _Ctx) ->
+    [];
+emit_instr(_, _Ctx) ->
+    [].
 
 %%% ===================================================================
 %%% Terminator placeholders
@@ -377,25 +491,31 @@ emit_term_ph({cond_br, {cmp, CmpOp, L, R}, TrueL, FalseL}, Ctx) ->
     SM = maps:get(spillmap, Ctx),
     LSpilled = is_vreg(L) andalso maps:is_key(L, SM),
     RSpilled = is_vreg(R) andalso maps:is_key(R, SM),
-    {Reloads, L2, R2} = case {LSpilled, RSpilled} of
-        {false, false} ->
-            {[], L, R};
-        {true, false} ->
-            %% L spilled → reload into SCRATCH (R5)
-            Off = maps:get(L, SM),
-            {[ebpf_insn:ldxdw(?SCRATCH, 10, Off)], {phys_override, ?SCRATCH}, R};
-        {false, true} ->
-            %% R spilled → reload into SCRATCH (R5)
-            Off = maps:get(R, SM),
-            {[ebpf_insn:ldxdw(?SCRATCH, 10, Off)], L, {phys_override, ?SCRATCH}};
-        {true, true} ->
-            %% Both spilled → L into R0, R into SCRATCH (R5)
-            LO = maps:get(L, SM),
-            RO = maps:get(R, SM),
-            {[ebpf_insn:ldxdw(0, 10, LO),
-              ebpf_insn:ldxdw(?SCRATCH, 10, RO)],
-             {phys_override, 0}, {phys_override, ?SCRATCH}}
-    end,
+    {Reloads, L2, R2} =
+        case {LSpilled, RSpilled} of
+            {false, false} ->
+                {[], L, R};
+            {true, false} ->
+                %% L spilled → reload into SCRATCH (R5)
+                Off = maps:get(L, SM),
+                {[ebpf_insn:ldxdw(?SCRATCH, 10, Off)], {phys_override, ?SCRATCH}, R};
+            {false, true} ->
+                %% R spilled → reload into SCRATCH (R5)
+                Off = maps:get(R, SM),
+                {[ebpf_insn:ldxdw(?SCRATCH, 10, Off)], L, {phys_override, ?SCRATCH}};
+            {true, true} ->
+                %% Both spilled → L into R0, R into SCRATCH (R5)
+                LO = maps:get(L, SM),
+                RO = maps:get(R, SM),
+                {
+                    [
+                        ebpf_insn:ldxdw(0, 10, LO),
+                        ebpf_insn:ldxdw(?SCRATCH, 10, RO)
+                    ],
+                    {phys_override, 0},
+                    {phys_override, ?SCRATCH}
+                }
+        end,
     Reloads ++ [?JCMP_PH(CmpOp, L2, R2, TrueL, FalseL), ?JA_PH(TrueL)];
 emit_term_ph({cond_br, Reg, TrueL, FalseL}, Ctx) ->
     %% Reload spilled boolean register before conditional jump
@@ -415,7 +535,8 @@ emit_term_ph(unreachable, _Ctx) ->
 %%% Jump patching
 %%% ===================================================================
 
-patch([], _Idx, _Starts, _Ctx) -> [];
+patch([], _Idx, _Starts, _Ctx) ->
+    [];
 patch([?JA_PH(Target) | Rest], Idx, Starts, Ctx) ->
     TargetIdx = maps:get(Target, Starts),
     Off = TargetIdx - (Idx + 1),
@@ -477,13 +598,17 @@ resolve_reg(Reg, Ctx) -> phys(Reg, Ctx).
 
 phys(Reg, #{spillmap := SM} = Ctx) ->
     case is_vreg(Reg) andalso maps:is_key(Reg, SM) of
-        true -> ?SCRATCH;  %% Spilled vreg uses scratch register
+        %% Spilled vreg uses scratch register
+        true -> ?SCRATCH;
         false -> phys_lookup(Reg, Ctx)
     end.
 
-phys_lookup(v_ret, #{regmap := RM}) -> maps:get(v_ret, RM, 0);
-phys_lookup(v_ctx, #{regmap := RM}) -> maps:get(v_ctx, RM, 1);
-phys_lookup(v_fp, #{regmap := RM})  -> maps:get(v_fp, RM, 10);
+phys_lookup(v_ret, #{regmap := RM}) ->
+    maps:get(v_ret, RM, 0);
+phys_lookup(v_ctx, #{regmap := RM}) ->
+    maps:get(v_ctx, RM, 1);
+phys_lookup(v_fp, #{regmap := RM}) ->
+    maps:get(v_fp, RM, 10);
 phys_lookup({v, N} = VReg, #{regmap := RM}) ->
     case maps:find(VReg, RM) of
         {ok, R} -> R;
@@ -527,9 +652,12 @@ parallel_move(Moves, Acc) ->
     AllSrcs = [S || {_, S} <- Moves, not is_imm(S)],
     %% A move is ready if its destination is NOT a source of any remaining move
     %% (i.e., writing to that destination won't clobber a value we still need)
-    {Ready, Blocked} = lists:partition(fun({D, _S}) ->
-        not lists:member(D, AllSrcs)
-    end, Moves),
+    {Ready, Blocked} = lists:partition(
+        fun({D, _S}) ->
+            not lists:member(D, AllSrcs)
+        end,
+        Moves
+    ),
     case Ready of
         [{D, S} | Rest] ->
             %% Emit one ready move and recurse
@@ -538,9 +666,18 @@ parallel_move(Moves, Acc) ->
             %% All moves are blocked (cycle). Break it using R0 as temp.
             [{D, S} | Rest] = Moves,
             %% Save S to R0, update all references to S to use R0
-            Rest2 = [{Dd, case Ss of S -> 0; _ -> Ss end} || {Dd, Ss} <- Rest],
-            parallel_move(Rest2 ++ [{D, 0}],
-                          [ebpf_insn:mov64_reg(0, S) | Acc])
+            Rest2 = [
+                {Dd,
+                    case Ss of
+                        S -> 0;
+                        _ -> Ss
+                    end}
+             || {Dd, Ss} <- Rest
+            ],
+            parallel_move(
+                Rest2 ++ [{D, 0}],
+                [ebpf_insn:mov64_reg(0, S) | Acc]
+            )
     end.
 
 is_imm({imm, _}) -> true;
@@ -549,28 +686,39 @@ is_imm(_) -> false.
 is_identity(D, D) -> true;
 is_identity(_, _) -> false.
 
-emit_call_args_pairs([], _, _Ctx) -> [];
+emit_call_args_pairs([], _, _Ctx) ->
+    [];
 emit_call_args_pairs(_, RegNum, _Ctx) when RegNum > 5 -> [];
 emit_call_args_pairs([Arg | Rest], RegNum, Ctx) ->
-    Src = case is_integer(Arg) of
-        true -> {imm, Arg};
-        false -> phys(Arg, Ctx)
-    end,
+    Src =
+        case is_integer(Arg) of
+            true -> {imm, Arg};
+            false -> phys(Arg, Ctx)
+        end,
     [{RegNum, Src} | emit_call_args_pairs(Rest, RegNum + 1, Ctx)].
 
 emit_one_arg(Dst, {imm, Val}) -> ebpf_insn:mov64_imm(Dst, Val);
 emit_one_arg(Dst, Src) -> ebpf_insn:mov64_reg(Dst, Src).
 
 %% Map helper function name (binary) to BPF helper ID.
-helper_id(<<"map_lookup_elem">>) -> 1;
-helper_id(<<"map_update_elem">>) -> 2;
-helper_id(<<"map_delete_elem">>) -> 3;
-helper_id(<<"ktime_get_ns">>)    -> 5;
-helper_id(<<"trace_printk">>)    -> 6;
-helper_id(<<"get_smp_processor_id">>) -> 14;
-helper_id(<<"redirect">>)        -> 23;
-helper_id(<<"skb_load_bytes">>)  -> 26;
-helper_id(<<"ringbuf_output">>)  -> 130;
+helper_id(<<"map_lookup_elem">>) ->
+    1;
+helper_id(<<"map_update_elem">>) ->
+    2;
+helper_id(<<"map_delete_elem">>) ->
+    3;
+helper_id(<<"ktime_get_ns">>) ->
+    5;
+helper_id(<<"trace_printk">>) ->
+    6;
+helper_id(<<"get_smp_processor_id">>) ->
+    14;
+helper_id(<<"redirect">>) ->
+    23;
+helper_id(<<"skb_load_bytes">>) ->
+    26;
+helper_id(<<"ringbuf_output">>) ->
+    130;
 helper_id(Name) when is_binary(Name) ->
     %% Unknown helper: use 0 as fallback (will fail at runtime)
     0;

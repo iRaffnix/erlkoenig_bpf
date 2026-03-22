@@ -1,36 +1,64 @@
-%% @doc Static BPF bytecode pre-verifier.
 %%
-%% Performs checks similar to the Linux kernel verifier but without
-%% requiring root or kernel access.  Catches common errors early:
-%% instruction limits, missing exit, invalid jumps, stack overflows,
-%% division by zero, uninitialized registers, null pointer derefs,
-%% R10 write protection, stack alignment, unreachable code, and
-%% helper argument type checking.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebl_pre_verify).
+-moduledoc """
+Static BPF bytecode pre-verifier.
+
+Performs checks similar to the Linux kernel verifier but without
+requiring root or kernel access.  Catches common errors early:
+instruction limits, missing exit, invalid jumps, stack overflows,
+division by zero, uninitialized registers, null pointer derefs,
+R10 write protection, stack alignment, unreachable code, and
+helper argument type checking.
+""".
 
 -include("ebpf_vm.hrl").
 
 -export([check/1, check/2]).
 
--type reg_val() :: not_init
-                 | {scalar, {integer(), integer()}}
-                 | {ptr_to_ctx}
-                 | {ptr_to_stack, integer()}
-                 | {ptr_to_packet, integer()}
-                 | {ptr_to_map_value_or_null}
-                 | {ptr_to_map_value}
-                 | {ptr_to_map}
-                 | init.
+-type reg_val() ::
+    not_init
+    | {scalar, {integer(), integer()}}
+    | {ptr_to_ctx}
+    | {ptr_to_stack, integer()}
+    | {ptr_to_packet, integer()}
+    | {ptr_to_map_value_or_null}
+    | {ptr_to_map_value}
+    | {ptr_to_map}
+    | init.
 
--type error() :: {instruction_limit_exceeded | invalid_jump_target | invalid_opcode
-                   | invalid_stack_access | possible_null_deref | stack_overflow
-                   | uninitialized_register, integer(), non_neg_integer()}
-               | {no_exit_instruction}
-               | {division_by_zero_imm, non_neg_integer()}
-               | {r10_write, non_neg_integer()}
-               | {stack_misalign, integer(), 2 | 4 | 8, non_neg_integer()}
-               | {unreachable_code, non_neg_integer()}
-               | {invalid_helper_arg, non_neg_integer(), pos_integer(), atom(), reg_val(), non_neg_integer()}.
+-type error() ::
+    {
+        instruction_limit_exceeded
+        | invalid_jump_target
+        | invalid_opcode
+        | invalid_stack_access
+        | possible_null_deref
+        | stack_overflow
+        | uninitialized_register,
+        integer(),
+        non_neg_integer()
+    }
+    | {no_exit_instruction}
+    | {division_by_zero_imm, non_neg_integer()}
+    | {r10_write, non_neg_integer()}
+    | {stack_misalign, integer(), 2 | 4 | 8, non_neg_integer()}
+    | {unreachable_code, non_neg_integer()}
+    | {invalid_helper_arg, non_neg_integer(), pos_integer(), atom(), reg_val(), non_neg_integer()}.
 
 -export_type([error/0]).
 
@@ -48,16 +76,17 @@ check(Bytecode, Opts) ->
             Insns = array:to_list(InsnArray),
             %% Build set of second-half-of-ld64 PCs
             Ld64Seconds = ld64_second_slots(Insns, 0, #{}),
-            Errors = check_insn_limit(NumInsns, InsnLimit) ++
-                     check_exit_exists(Insns) ++
-                     check_invalid_opcodes(Insns) ++
-                     check_jump_targets(Insns, NumInsns, Ld64Seconds) ++
-                     check_stack_bounds(Insns, StackLimit) ++
-                     check_div_by_zero(Insns) ++
-                     check_abstract(InsnArray, NumInsns, StackLimit, Ld64Seconds),
+            Errors =
+                check_insn_limit(NumInsns, InsnLimit) ++
+                    check_exit_exists(Insns) ++
+                    check_invalid_opcodes(Insns) ++
+                    check_jump_targets(Insns, NumInsns, Ld64Seconds) ++
+                    check_stack_bounds(Insns, StackLimit) ++
+                    check_div_by_zero(Insns) ++
+                    check_abstract(InsnArray, NumInsns, StackLimit, Ld64Seconds),
             case Errors of
                 [] -> ok;
-                _  -> {error, Errors}
+                _ -> {error, Errors}
             end
     catch
         _:_ ->
@@ -80,7 +109,13 @@ check_insn_limit(_, _) ->
 check_exit_exists([]) ->
     [{no_exit_instruction}];
 check_exit_exists(Insns) ->
-    HasExit = lists:any(fun(#vm_insn{op = exit_insn}) -> true; (_) -> false end, Insns),
+    HasExit = lists:any(
+        fun
+            (#vm_insn{op = exit_insn}) -> true;
+            (_) -> false
+        end,
+        Insns
+    ),
     case HasExit of
         true -> [];
         false -> [{no_exit_instruction}]
@@ -110,22 +145,25 @@ check_jump_targets(Insns, NumInsns, Ld64Seconds) ->
 check_jump_targets([], _PC, _NumInsns, _Ld64Seconds) ->
     [];
 check_jump_targets([Insn | Rest], PC, NumInsns, Ld64Seconds) ->
-    Errors = case is_jump(Insn#vm_insn.op) of
-        {true, unconditional} ->
-            Target = PC + 1 + Insn#vm_insn.off,
-            validate_target(Target, PC, NumInsns, Ld64Seconds);
-        {true, conditional} ->
-            Target = PC + 1 + Insn#vm_insn.off,
-            validate_target(Target, PC, NumInsns, Ld64Seconds);
-        false ->
-            []
-    end,
+    Errors =
+        case is_jump(Insn#vm_insn.op) of
+            {true, unconditional} ->
+                Target = PC + 1 + Insn#vm_insn.off,
+                validate_target(Target, PC, NumInsns, Ld64Seconds);
+            {true, conditional} ->
+                Target = PC + 1 + Insn#vm_insn.off,
+                validate_target(Target, PC, NumInsns, Ld64Seconds);
+            false ->
+                []
+        end,
     Errors ++ check_jump_targets(Rest, PC + 1, NumInsns, Ld64Seconds).
 
 validate_target(Target, PC, NumInsns, Ld64Seconds) ->
     if
-        Target < 0 -> [{invalid_jump_target, Target, PC}];
-        Target >= NumInsns -> [{invalid_jump_target, Target, PC}];
+        Target < 0 ->
+            [{invalid_jump_target, Target, PC}];
+        Target >= NumInsns ->
+            [{invalid_jump_target, Target, PC}];
         true ->
             case maps:is_key(Target, Ld64Seconds) of
                 true -> [{invalid_jump_target, Target, PC}];
@@ -133,7 +171,8 @@ validate_target(Target, PC, NumInsns, Ld64Seconds) ->
             end
     end.
 
-is_jump(ja) -> {true, unconditional};
+is_jump(ja) ->
+    {true, unconditional};
 is_jump(Op) ->
     case atom_to_list(Op) of
         "j" ++ _ -> {true, conditional};
@@ -150,22 +189,23 @@ check_stack_bounds(Insns, StackLimit) ->
 check_stack_bounds([], _PC, _StackLimit) ->
     [];
 check_stack_bounds([Insn | Rest], PC, StackLimit) ->
-    Errors = case is_stack_access(Insn) of
-        {true, Offset} ->
-            BoundsErrors =
-                if
-                    Offset < -StackLimit ->
-                        [{stack_overflow, Offset, StackLimit}];
-                    Offset >= 0 ->
-                        [{invalid_stack_access, Offset, PC}];
-                    true ->
-                        []
-                end,
-            AlignErrors = check_stack_alignment(Insn#vm_insn.op, Offset, PC),
-            BoundsErrors ++ AlignErrors;
-        false ->
-            []
-    end,
+    Errors =
+        case is_stack_access(Insn) of
+            {true, Offset} ->
+                BoundsErrors =
+                    if
+                        Offset < -StackLimit ->
+                            [{stack_overflow, Offset, StackLimit}];
+                        Offset >= 0 ->
+                            [{invalid_stack_access, Offset, PC}];
+                        true ->
+                            []
+                    end,
+                AlignErrors = check_stack_alignment(Insn#vm_insn.op, Offset, PC),
+                BoundsErrors ++ AlignErrors;
+            false ->
+                []
+        end,
     Errors ++ check_stack_bounds(Rest, PC + 1, StackLimit).
 
 %% P10: Stack alignment check
@@ -174,14 +214,15 @@ check_stack_alignment(Op, Offset, PC) ->
     case Op of
         ldxdw -> check_align(AbsOff, 8, Offset, PC);
         stxdw -> check_align(AbsOff, 8, Offset, PC);
-        stdw  -> check_align(AbsOff, 8, Offset, PC);
-        ldxw  -> check_align(AbsOff, 4, Offset, PC);
-        stxw  -> check_align(AbsOff, 4, Offset, PC);
-        stw   -> check_align(AbsOff, 4, Offset, PC);
-        ldxh  -> check_align(AbsOff, 2, Offset, PC);
-        stxh  -> check_align(AbsOff, 2, Offset, PC);
-        sth   -> check_align(AbsOff, 2, Offset, PC);
-        _     -> []  %% byte ops and others: no alignment requirement
+        stdw -> check_align(AbsOff, 8, Offset, PC);
+        ldxw -> check_align(AbsOff, 4, Offset, PC);
+        stxw -> check_align(AbsOff, 4, Offset, PC);
+        stw -> check_align(AbsOff, 4, Offset, PC);
+        ldxh -> check_align(AbsOff, 2, Offset, PC);
+        stxh -> check_align(AbsOff, 2, Offset, PC);
+        sth -> check_align(AbsOff, 2, Offset, PC);
+        %% byte ops and others: no alignment requirement
+        _ -> []
     end.
 
 check_align(AbsOff, Size, Offset, PC) ->
@@ -193,18 +234,18 @@ check_align(AbsOff, Size, Offset, PC) ->
 %% Check if instruction accesses stack (base register = R10)
 is_stack_access(#vm_insn{op = Op, dst = Dst, src = Src, off = Off}) ->
     case Op of
-        ldxw  -> is_stack_reg(Src, Off);
-        ldxh  -> is_stack_reg(Src, Off);
-        ldxb  -> is_stack_reg(Src, Off);
+        ldxw -> is_stack_reg(Src, Off);
+        ldxh -> is_stack_reg(Src, Off);
+        ldxb -> is_stack_reg(Src, Off);
         ldxdw -> is_stack_reg(Src, Off);
-        stxw  -> is_stack_reg(Dst, Off);
-        stxh  -> is_stack_reg(Dst, Off);
-        stxb  -> is_stack_reg(Dst, Off);
+        stxw -> is_stack_reg(Dst, Off);
+        stxh -> is_stack_reg(Dst, Off);
+        stxb -> is_stack_reg(Dst, Off);
         stxdw -> is_stack_reg(Dst, Off);
-        stw   -> is_stack_reg(Dst, Off);
-        sth   -> is_stack_reg(Dst, Off);
-        stb   -> is_stack_reg(Dst, Off);
-        stdw  -> is_stack_reg(Dst, Off);
+        stw -> is_stack_reg(Dst, Off);
+        sth -> is_stack_reg(Dst, Off);
+        stb -> is_stack_reg(Dst, Off);
+        stdw -> is_stack_reg(Dst, Off);
         _ -> false
     end.
 
@@ -220,9 +261,12 @@ check_div_by_zero(Insns) ->
 
 check_div_by_zero([], _PC) ->
     [];
-check_div_by_zero([#vm_insn{op = Op, imm = 0} | Rest], PC)
-  when Op =:= div64_imm; Op =:= mod64_imm;
-       Op =:= div32_imm; Op =:= mod32_imm ->
+check_div_by_zero([#vm_insn{op = Op, imm = 0} | Rest], PC) when
+    Op =:= div64_imm;
+    Op =:= mod64_imm;
+    Op =:= div32_imm;
+    Op =:= mod32_imm
+->
     [{division_by_zero_imm, PC} | check_div_by_zero(Rest, PC + 1)];
 check_div_by_zero([_ | Rest], PC) ->
     check_div_by_zero(Rest, PC + 1).
@@ -240,10 +284,11 @@ check_abstract(InsnArray, NumInsns, _StackLimit, Ld64Seconds) ->
     HasJumps = program_has_jumps(InsnArray, NumInsns),
     {Errors, FinalVisited} =
         interpret_loop(InsnArray, NumInsns, Worklist, Visited, [], Ld64Seconds),
-    UnreachableErrors = case HasJumps of
-        true -> check_unreachable(FinalVisited, NumInsns, Ld64Seconds);
-        false -> []
-    end,
+    UnreachableErrors =
+        case HasJumps of
+            true -> check_unreachable(FinalVisited, NumInsns, Ld64Seconds);
+            false -> []
+        end,
     Errors ++ UnreachableErrors.
 
 program_has_jumps(InsnArray, NumInsns) ->
@@ -274,15 +319,31 @@ interpret_loop(InsnArray, NumInsns, [{PC, Regs} | Rest], Visited, Errors, Ld64Se
                             interpret_loop(InsnArray, NumInsns, Rest, Visited, Errors, Ld64Seconds);
                         false ->
                             Visited1 = Visited#{PC => Merged},
-                            {NewErrors, Successors} = analyze_insn(InsnArray, PC, Merged, NumInsns, Ld64Seconds),
-                            interpret_loop(InsnArray, NumInsns, Successors ++ Rest,
-                                           Visited1, NewErrors ++ Errors, Ld64Seconds)
+                            {NewErrors, Successors} = analyze_insn(
+                                InsnArray, PC, Merged, NumInsns, Ld64Seconds
+                            ),
+                            interpret_loop(
+                                InsnArray,
+                                NumInsns,
+                                Successors ++ Rest,
+                                Visited1,
+                                NewErrors ++ Errors,
+                                Ld64Seconds
+                            )
                     end;
                 error ->
                     Visited1 = Visited#{PC => Regs},
-                    {NewErrors, Successors} = analyze_insn(InsnArray, PC, Regs, NumInsns, Ld64Seconds),
-                    interpret_loop(InsnArray, NumInsns, Successors ++ Rest,
-                                   Visited1, NewErrors ++ Errors, Ld64Seconds)
+                    {NewErrors, Successors} = analyze_insn(
+                        InsnArray, PC, Regs, NumInsns, Ld64Seconds
+                    ),
+                    interpret_loop(
+                        InsnArray,
+                        NumInsns,
+                        Successors ++ Rest,
+                        Visited1,
+                        NewErrors ++ Errors,
+                        Ld64Seconds
+                    )
             end
     end.
 
@@ -291,14 +352,20 @@ interpret_loop(InsnArray, NumInsns, [{PC, Regs} | Rest], Visited, Errors, Ld64Se
 %%% ===================================================================
 
 merge_regs(Regs1, Regs2) ->
-    maps:map(fun(K, V1) ->
-        V2 = maps:get(K, Regs2, not_init),
-        merge_val(V1, V2)
-    end, Regs1).
+    maps:map(
+        fun(K, V1) ->
+            V2 = maps:get(K, Regs2, not_init),
+            merge_val(V1, V2)
+        end,
+        Regs1
+    ).
 
-merge_val(Same, Same) -> Same;
-merge_val(not_init, _) -> not_init;
-merge_val(_, not_init) -> not_init;
+merge_val(Same, Same) ->
+    Same;
+merge_val(not_init, _) ->
+    not_init;
+merge_val(_, not_init) ->
+    not_init;
 merge_val({scalar, {A, B}}, {scalar, {C, D}}) ->
     %% Widen: merge the ranges, but collapse to init if the resulting range
     %% is wider than either input.  This guarantees convergence in loops —
@@ -336,29 +403,31 @@ analyze_insn(InsnArray, PC, Regs, _NumInsns, _Ld64Seconds) ->
             %% Check R0 is readable
             E = check_read(0, Regs, PC),
             {E, []};
-
         call ->
             %% P12: Helper argument type checking
             HelperErrors = check_helper_args(Imm, Regs, PC),
             %% After call: R0 = result, R1-R5 clobbered
-            Regs1 = Regs#{0 => init,
-                          1 => not_init, 2 => not_init,
-                          3 => not_init, 4 => not_init, 5 => not_init},
+            Regs1 = Regs#{
+                0 => init,
+                1 => not_init,
+                2 => not_init,
+                3 => not_init,
+                4 => not_init,
+                5 => not_init
+            },
             %% Special case: call 1 = map_lookup_elem -> R0 = maybe null
-            Regs2 = case Imm of
-                1 -> Regs1#{0 => {ptr_to_map_value_or_null}};
-                _ -> Regs1
-            end,
+            Regs2 =
+                case Imm of
+                    1 -> Regs1#{0 => {ptr_to_map_value_or_null}};
+                    _ -> Regs1
+                end,
             {HelperErrors, [{PC + 1, Regs2}]};
-
         ja ->
             Target = PC + 1 + Off,
             {[], [{Target, Regs}]};
-
         nop ->
             %% Second slot of LD_IMM64 — just fall through
             {[], [{PC + 1, Regs}]};
-
         _ ->
             case classify_op(Op) of
                 {alu_imm, AluOp} ->
@@ -370,7 +439,6 @@ analyze_insn(InsnArray, PC, Regs, _NumInsns, _Ld64Seconds) ->
                     NewDst = compute_alu_imm(AluOp, DstVal, Imm),
                     Regs1 = Regs#{Dst => NewDst},
                     {R10Err ++ E, [{PC + 1, Regs1}]};
-
                 {alu_reg, AluOp} ->
                     %% P9: R10 write protection
                     R10Err = check_r10_write(Dst, PC),
@@ -381,14 +449,12 @@ analyze_insn(InsnArray, PC, Regs, _NumInsns, _Ld64Seconds) ->
                     NewDst = compute_alu_reg(AluOp, DstVal, SrcVal),
                     Regs1 = Regs#{Dst => NewDst},
                     {R10Err ++ E, [{PC + 1, Regs1}]};
-
                 {mov_imm} ->
                     %% P9: R10 write protection
                     R10Err = check_r10_write(Dst, PC),
                     %% dst = imm; write dst (no read)
                     Regs1 = Regs#{Dst => {scalar, {Imm, Imm}}},
                     {R10Err, [{PC + 1, Regs1}]};
-
                 {mov_reg} ->
                     %% P9: R10 write protection
                     R10Err = check_r10_write(Dst, PC),
@@ -398,48 +464,45 @@ analyze_insn(InsnArray, PC, Regs, _NumInsns, _Ld64Seconds) ->
                     SrcVal = maps:get(Src, Regs, not_init),
                     Regs1 = Regs#{Dst => SrcVal},
                     {R10Err ++ E, [{PC + 1, Regs1}]};
-
                 {neg} ->
                     %% P9: R10 write protection
                     R10Err = check_r10_write(Dst, PC),
                     %% dst = -dst; read+write dst
                     E = check_read(Dst, Regs, PC),
                     DstVal = maps:get(Dst, Regs, not_init),
-                    NewDst = case DstVal of
-                        {scalar, {A, B}} -> {scalar, {-B, -A}};
-                        _ -> init
-                    end,
+                    NewDst =
+                        case DstVal of
+                            {scalar, {A, B}} -> {scalar, {-B, -A}};
+                            _ -> init
+                        end,
                     Regs1 = Regs#{Dst => NewDst},
                     {R10Err ++ E, [{PC + 1, Regs1}]};
-
                 {ld64} ->
                     %% dst = imm64; write dst, skip next slot (nop)
                     %% Distinguish ld_map_fd from plain ld64_imm
-                    NewDst = case Op of
-                        ld_map_fd -> {ptr_to_map};
-                        _ -> init
-                    end,
+                    NewDst =
+                        case Op of
+                            ld_map_fd -> {ptr_to_map};
+                            _ -> init
+                        end,
                     Regs1 = Regs#{Dst => NewDst},
                     {[], [{PC + 2, Regs1}]};
-
                 {ldx} ->
                     %% dst = [src + off]; read src, write dst
-                    E = check_read(Src, Regs, PC) ++
-                        check_deref(Src, Regs, PC),
+                    E =
+                        check_read(Src, Regs, PC) ++
+                            check_deref(Src, Regs, PC),
                     %% Result depends on base register type, but always init
                     Regs1 = Regs#{Dst => init},
                     {E, [{PC + 1, Regs1}]};
-
                 {stx} ->
                     %% [dst + off] = src; read src+dst — does NOT write to register Dst
                     E = check_read(Src, Regs, PC) ++ check_read(Dst, Regs, PC),
                     {E, [{PC + 1, Regs}]};
-
                 {st_imm} ->
                     %% [dst + off] = imm; read dst — does NOT write to register Dst
                     E = check_read(Dst, Regs, PC),
                     {E, [{PC + 1, Regs}]};
-
                 {cond_jmp_imm} ->
                     %% Conditional: read dst, branch to PC+1 and PC+1+off
                     E = check_read(Dst, Regs, PC),
@@ -447,14 +510,12 @@ analyze_insn(InsnArray, PC, Regs, _NumInsns, _Ld64Seconds) ->
                     %% NULL check analysis for P8
                     {RegsFall, RegsBranch} = null_check_split(Op, Dst, Imm, Regs),
                     {E, [{PC + 1, RegsFall}, {Target, RegsBranch}]};
-
                 {cond_jmp_reg} ->
                     %% Conditional: read dst+src, branch
                     E = check_read(Dst, Regs, PC) ++ check_read(Src, Regs, PC),
                     Target = PC + 1 + Off,
                     {RegsFall, RegsBranch} = null_check_split_reg(Op, Dst, Src, Regs),
                     {E, [{PC + 1, RegsFall}, {Target, RegsBranch}]};
-
                 unknown ->
                     {[], [{PC + 1, Regs}]}
             end
@@ -477,34 +538,55 @@ compute_alu_imm(add, {ptr_to_stack, Off}, Imm) ->
     {ptr_to_stack, Off + Imm};
 compute_alu_imm(sub, {scalar, {A, B}}, Imm) ->
     {scalar, {A - Imm, B - Imm}};
-compute_alu_imm(add, {ptr_to_ctx}, _Imm) -> init;
-compute_alu_imm(add, {ptr_to_packet, _}, _Imm) -> init;
-compute_alu_imm(add, {ptr_to_map_value}, _Imm) -> init;
-compute_alu_imm(add, {ptr_to_map_value_or_null}, _Imm) -> init;
-compute_alu_imm(add, {ptr_to_map}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_ctx}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_packet, _}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_map_value}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_map_value_or_null}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_map}, _Imm) -> init;
-compute_alu_imm(sub, {ptr_to_stack, _}, _Imm) -> init;
+compute_alu_imm(add, {ptr_to_ctx}, _Imm) ->
+    init;
+compute_alu_imm(add, {ptr_to_packet, _}, _Imm) ->
+    init;
+compute_alu_imm(add, {ptr_to_map_value}, _Imm) ->
+    init;
+compute_alu_imm(add, {ptr_to_map_value_or_null}, _Imm) ->
+    init;
+compute_alu_imm(add, {ptr_to_map}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_ctx}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_packet, _}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_map_value}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_map_value_or_null}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_map}, _Imm) ->
+    init;
+compute_alu_imm(sub, {ptr_to_stack, _}, _Imm) ->
+    init;
 compute_alu_imm(_Op, {scalar, _}, _Imm) ->
     {scalar, {0, 16#ffffffffffffffff}};
-compute_alu_imm(_Op, init, _Imm) -> init;
-compute_alu_imm(_Op, not_init, _Imm) -> not_init;
-compute_alu_imm(_Op, _, _Imm) -> init.
+compute_alu_imm(_Op, init, _Imm) ->
+    init;
+compute_alu_imm(_Op, not_init, _Imm) ->
+    not_init;
+compute_alu_imm(_Op, _, _Imm) ->
+    init.
 
 compute_alu_reg(add, {scalar, {A, B}}, {scalar, {C, D}}) ->
     {scalar, {A + C, B + D}};
 compute_alu_reg(_Op, {scalar, _}, {scalar, _}) ->
     {scalar, {0, 16#ffffffffffffffff}};
-compute_alu_reg(_Op, {scalar, _}, _) -> init;
-compute_alu_reg(_Op, _, {scalar, _}) -> init;
-compute_alu_reg(_Op, init, _) -> init;
-compute_alu_reg(_Op, _, init) -> init;
-compute_alu_reg(_Op, not_init, _) -> not_init;
-compute_alu_reg(_Op, _, not_init) -> not_init;
-compute_alu_reg(_Op, _, _) -> init.
+compute_alu_reg(_Op, {scalar, _}, _) ->
+    init;
+compute_alu_reg(_Op, _, {scalar, _}) ->
+    init;
+compute_alu_reg(_Op, init, _) ->
+    init;
+compute_alu_reg(_Op, _, init) ->
+    init;
+compute_alu_reg(_Op, not_init, _) ->
+    not_init;
+compute_alu_reg(_Op, _, not_init) ->
+    not_init;
+compute_alu_reg(_Op, _, _) ->
+    init.
 
 %%% ===================================================================
 %%% P12: Helper argument type checking
@@ -513,16 +595,16 @@ compute_alu_reg(_Op, _, _) -> init.
 check_helper_args(1, Regs, PC) ->
     %% map_lookup_elem: R1 = map, R2 = key (stack ptr)
     check_helper_arg(1, 1, ptr_to_map, Regs, PC) ++
-    check_helper_arg(1, 2, ptr_to_stack, Regs, PC);
+        check_helper_arg(1, 2, ptr_to_stack, Regs, PC);
 check_helper_args(2, Regs, PC) ->
     %% map_update_elem: R1 = map, R2 = key, R3 = value
     check_helper_arg(2, 1, ptr_to_map, Regs, PC) ++
-    check_helper_arg(2, 2, ptr_to_stack, Regs, PC) ++
-    check_helper_arg(2, 3, ptr_to_stack, Regs, PC);
+        check_helper_arg(2, 2, ptr_to_stack, Regs, PC) ++
+        check_helper_arg(2, 3, ptr_to_stack, Regs, PC);
 check_helper_args(3, Regs, PC) ->
     %% map_delete_elem: R1 = map, R2 = key
     check_helper_arg(3, 1, ptr_to_map, Regs, PC) ++
-    check_helper_arg(3, 2, ptr_to_stack, Regs, PC);
+        check_helper_arg(3, 2, ptr_to_stack, Regs, PC);
 check_helper_args(_HelperID, _Regs, _PC) ->
     [].
 
@@ -632,86 +714,155 @@ check_unreachable(Visited, PC, NumInsns, Ld64Seconds) ->
 %%% Instruction classification
 %%% ===================================================================
 
-classify_op(mov64_imm) -> {mov_imm};
-classify_op(mov32_imm) -> {mov_imm};
-classify_op(mov64_reg) -> {mov_reg};
-classify_op(mov32_reg) -> {mov_reg};
-classify_op(neg64) -> {neg};
-classify_op(neg32) -> {neg};
-classify_op(ld64_imm) -> {ld64};
-classify_op(ld_map_fd) -> {ld64};
-classify_op(ld_map_value) -> {ld64};
-classify_op(ldxw)  -> {ldx};
-classify_op(ldxh)  -> {ldx};
-classify_op(ldxb)  -> {ldx};
-classify_op(ldxdw) -> {ldx};
-classify_op(stxw)  -> {stx};
-classify_op(stxh)  -> {stx};
-classify_op(stxb)  -> {stx};
-classify_op(stxdw) -> {stx};
-classify_op(stw)  -> {st_imm};
-classify_op(sth)  -> {st_imm};
-classify_op(stb)  -> {st_imm};
-classify_op(stdw) -> {st_imm};
-classify_op(ja) -> unknown;  %% handled separately
+classify_op(mov64_imm) ->
+    {mov_imm};
+classify_op(mov32_imm) ->
+    {mov_imm};
+classify_op(mov64_reg) ->
+    {mov_reg};
+classify_op(mov32_reg) ->
+    {mov_reg};
+classify_op(neg64) ->
+    {neg};
+classify_op(neg32) ->
+    {neg};
+classify_op(ld64_imm) ->
+    {ld64};
+classify_op(ld_map_fd) ->
+    {ld64};
+classify_op(ld_map_value) ->
+    {ld64};
+classify_op(ldxw) ->
+    {ldx};
+classify_op(ldxh) ->
+    {ldx};
+classify_op(ldxb) ->
+    {ldx};
+classify_op(ldxdw) ->
+    {ldx};
+classify_op(stxw) ->
+    {stx};
+classify_op(stxh) ->
+    {stx};
+classify_op(stxb) ->
+    {stx};
+classify_op(stxdw) ->
+    {stx};
+classify_op(stw) ->
+    {st_imm};
+classify_op(sth) ->
+    {st_imm};
+classify_op(stb) ->
+    {st_imm};
+classify_op(stdw) ->
+    {st_imm};
+%% handled separately
+classify_op(ja) ->
+    unknown;
 classify_op(Op) ->
     Name = atom_to_list(Op),
     case Name of
-        "add64_imm" -> {alu_imm, add};
-        "sub64_imm" -> {alu_imm, sub};
-        "mul64_imm" -> {alu_imm, mul};
-        "div64_imm" -> {alu_imm, div_op};
-        "or64_imm"  -> {alu_imm, bor_op};
-        "and64_imm" -> {alu_imm, band_op};
-        "lsh64_imm" -> {alu_imm, lsh};
-        "rsh64_imm" -> {alu_imm, rsh};
-        "mod64_imm" -> {alu_imm, mod};
-        "xor64_imm" -> {alu_imm, xor_op};
-        "arsh64_imm" -> {alu_imm, arsh};
-        "add32_imm" -> {alu_imm, add};
-        "sub32_imm" -> {alu_imm, sub};
-        "mul32_imm" -> {alu_imm, mul};
-        "div32_imm" -> {alu_imm, div_op};
-        "or32_imm"  -> {alu_imm, bor_op};
-        "and32_imm" -> {alu_imm, band_op};
-        "lsh32_imm" -> {alu_imm, lsh};
-        "rsh32_imm" -> {alu_imm, rsh};
-        "mod32_imm" -> {alu_imm, mod};
-        "xor32_imm" -> {alu_imm, xor_op};
-        "arsh32_imm" -> {alu_imm, arsh};
-        "add64_reg" -> {alu_reg, add};
-        "sub64_reg" -> {alu_reg, sub};
-        "mul64_reg" -> {alu_reg, mul};
-        "div64_reg" -> {alu_reg, div_op};
-        "or64_reg"  -> {alu_reg, bor_op};
-        "and64_reg" -> {alu_reg, band_op};
-        "lsh64_reg" -> {alu_reg, lsh};
-        "rsh64_reg" -> {alu_reg, rsh};
-        "mod64_reg" -> {alu_reg, mod};
-        "xor64_reg" -> {alu_reg, xor_op};
-        "arsh64_reg" -> {alu_reg, arsh};
-        "add32_reg" -> {alu_reg, add};
-        "sub32_reg" -> {alu_reg, sub};
-        "mul32_reg" -> {alu_reg, mul};
-        "div32_reg" -> {alu_reg, div_op};
-        "or32_reg"  -> {alu_reg, bor_op};
-        "and32_reg" -> {alu_reg, band_op};
-        "lsh32_reg" -> {alu_reg, lsh};
-        "rsh32_reg" -> {alu_reg, rsh};
-        "mod32_reg" -> {alu_reg, mod};
-        "xor32_reg" -> {alu_reg, xor_op};
-        "arsh32_reg" -> {alu_reg, arsh};
+        "add64_imm" ->
+            {alu_imm, add};
+        "sub64_imm" ->
+            {alu_imm, sub};
+        "mul64_imm" ->
+            {alu_imm, mul};
+        "div64_imm" ->
+            {alu_imm, div_op};
+        "or64_imm" ->
+            {alu_imm, bor_op};
+        "and64_imm" ->
+            {alu_imm, band_op};
+        "lsh64_imm" ->
+            {alu_imm, lsh};
+        "rsh64_imm" ->
+            {alu_imm, rsh};
+        "mod64_imm" ->
+            {alu_imm, mod};
+        "xor64_imm" ->
+            {alu_imm, xor_op};
+        "arsh64_imm" ->
+            {alu_imm, arsh};
+        "add32_imm" ->
+            {alu_imm, add};
+        "sub32_imm" ->
+            {alu_imm, sub};
+        "mul32_imm" ->
+            {alu_imm, mul};
+        "div32_imm" ->
+            {alu_imm, div_op};
+        "or32_imm" ->
+            {alu_imm, bor_op};
+        "and32_imm" ->
+            {alu_imm, band_op};
+        "lsh32_imm" ->
+            {alu_imm, lsh};
+        "rsh32_imm" ->
+            {alu_imm, rsh};
+        "mod32_imm" ->
+            {alu_imm, mod};
+        "xor32_imm" ->
+            {alu_imm, xor_op};
+        "arsh32_imm" ->
+            {alu_imm, arsh};
+        "add64_reg" ->
+            {alu_reg, add};
+        "sub64_reg" ->
+            {alu_reg, sub};
+        "mul64_reg" ->
+            {alu_reg, mul};
+        "div64_reg" ->
+            {alu_reg, div_op};
+        "or64_reg" ->
+            {alu_reg, bor_op};
+        "and64_reg" ->
+            {alu_reg, band_op};
+        "lsh64_reg" ->
+            {alu_reg, lsh};
+        "rsh64_reg" ->
+            {alu_reg, rsh};
+        "mod64_reg" ->
+            {alu_reg, mod};
+        "xor64_reg" ->
+            {alu_reg, xor_op};
+        "arsh64_reg" ->
+            {alu_reg, arsh};
+        "add32_reg" ->
+            {alu_reg, add};
+        "sub32_reg" ->
+            {alu_reg, sub};
+        "mul32_reg" ->
+            {alu_reg, mul};
+        "div32_reg" ->
+            {alu_reg, div_op};
+        "or32_reg" ->
+            {alu_reg, bor_op};
+        "and32_reg" ->
+            {alu_reg, band_op};
+        "lsh32_reg" ->
+            {alu_reg, lsh};
+        "rsh32_reg" ->
+            {alu_reg, rsh};
+        "mod32_reg" ->
+            {alu_reg, mod};
+        "xor32_reg" ->
+            {alu_reg, xor_op};
+        "arsh32_reg" ->
+            {alu_reg, arsh};
         %% Conditional jumps
         "j" ++ Rest ->
             case lists:suffix("_imm", Rest) orelse lists:suffix("32_imm", Rest) of
-                true -> {cond_jmp_imm};
+                true ->
+                    {cond_jmp_imm};
                 false ->
                     case lists:suffix("_reg", Rest) orelse lists:suffix("32_reg", Rest) of
                         true -> {cond_jmp_reg};
                         false -> unknown
                     end
             end;
-        _ -> unknown
+        _ ->
+            unknown
     end.
 
 %%% ===================================================================
@@ -720,8 +871,9 @@ classify_op(Op) ->
 
 ld64_second_slots([], _PC, Acc) ->
     Acc;
-ld64_second_slots([#vm_insn{op = Op} | Rest], PC, Acc)
-  when Op =:= ld64_imm; Op =:= ld_map_fd; Op =:= ld_map_value ->
+ld64_second_slots([#vm_insn{op = Op} | Rest], PC, Acc) when
+    Op =:= ld64_imm; Op =:= ld_map_fd; Op =:= ld_map_value
+->
     %% Next slot (PC+1) is the nop placeholder
     ld64_second_slots(Rest, PC + 1, Acc#{PC + 1 => true});
 ld64_second_slots([_ | Rest], PC, Acc) ->

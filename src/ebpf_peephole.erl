@@ -1,9 +1,27 @@
-%% @doc Peephole optimizer for BPF instruction sequences.
 %%
-%% Safe patterns only — no transformations that could break the verifier.
-%% Jump-aware: after removing instructions, adjusts all jump offsets.
-%% Patterns: P1 (redundant mov), P2 (store-load), P3 (double store).
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_peephole).
+-moduledoc """
+Peephole optimizer for BPF instruction sequences.
+
+Safe patterns only — no transformations that could break the verifier.
+Jump-aware: after removing instructions, adjusts all jump offsets.
+Patterns: P1 (redundant mov), P2 (store-load), P3 (double store).
+""".
 
 -export([optimize/1]).
 
@@ -25,7 +43,8 @@ optimize(Bin) ->
     end.
 
 %% Check if any instruction is a jump
-has_jumps([]) -> false;
+has_jumps([]) ->
+    false;
 has_jumps([Insn | Rest]) ->
     case ebpf_insn:decode(Insn) of
         {ja, _, _, _, _} -> true;
@@ -55,7 +74,8 @@ has_jumps([Insn | Rest]) ->
     end.
 
 %% Split binary into list of 8-byte instruction binaries.
-split_insns(<<>>, Acc) -> lists:reverse(Acc);
+split_insns(<<>>, Acc) ->
+    lists:reverse(Acc);
 split_insns(<<16#18, _:7/binary, _:8/binary, Rest/binary>> = Bin, Acc) ->
     <<Insn:16/binary, _/binary>> = Bin,
     split_insns(Rest, [Insn | Acc]);
@@ -106,9 +126,9 @@ peephole([Insn | Rest], Acc) ->
 %% P2: Store-load forwarding
 try_p2(Store, Load) ->
     case {ebpf_insn:decode(Store), ebpf_insn:decode(Load)} of
-        {{stxb,  D1, S1, Off, 0}, {ldxb,  D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
-        {{stxh,  D1, S1, Off, 0}, {ldxh,  D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
-        {{stxw,  D1, S1, Off, 0}, {ldxw,  D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
+        {{stxb, D1, S1, Off, 0}, {ldxb, D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
+        {{stxh, D1, S1, Off, 0}, {ldxh, D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
+        {{stxw, D1, S1, Off, 0}, {ldxw, D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
         {{stxdw, D1, S1, Off, 0}, {ldxdw, D2, D1, Off, 0}} -> {ok, [ebpf_insn:mov64_reg(D2, S1)]};
         _ -> none
     end.
@@ -116,9 +136,9 @@ try_p2(Store, Load) ->
 %% P3: Double store elimination
 try_p3(First, Second) ->
     case {ebpf_insn:decode(First), ebpf_insn:decode(Second)} of
-        {{stxb,  D, _, Off, 0}, {stxb,  D, _, Off, 0}} -> {ok, Second};
-        {{stxh,  D, _, Off, 0}, {stxh,  D, _, Off, 0}} -> {ok, Second};
-        {{stxw,  D, _, Off, 0}, {stxw,  D, _, Off, 0}} -> {ok, Second};
+        {{stxb, D, _, Off, 0}, {stxb, D, _, Off, 0}} -> {ok, Second};
+        {{stxh, D, _, Off, 0}, {stxh, D, _, Off, 0}} -> {ok, Second};
+        {{stxw, D, _, Off, 0}, {stxw, D, _, Off, 0}} -> {ok, Second};
         {{stxdw, D, _, Off, 0}, {stxdw, D, _, Off, 0}} -> {ok, Second};
         _ -> none
     end.

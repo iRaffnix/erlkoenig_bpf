@@ -1,5 +1,22 @@
+%%
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_ctx_test).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 %%% ===================================================================
 %%% XDP context fields (struct xdp_md)
@@ -65,14 +82,20 @@ tc_field_count_test() ->
 %%% ===================================================================
 
 all_xdp_fields_are_u32_test() ->
-    lists:foreach(fun({_Name, _Off, Size}) ->
-        ?assertEqual(4, Size)
-    end, ebpf_ctx:fields(xdp)).
+    lists:foreach(
+        fun({_Name, _Off, Size}) ->
+            ?assertEqual(4, Size)
+        end,
+        ebpf_ctx:fields(xdp)
+    ).
 
 all_tc_fields_are_u32_test() ->
-    lists:foreach(fun({_Name, _Off, Size}) ->
-        ?assertEqual(4, Size)
-    end, ebpf_ctx:fields(tc)).
+    lists:foreach(
+        fun({_Name, _Off, Size}) ->
+            ?assertEqual(4, Size)
+        end,
+        ebpf_ctx:fields(tc)
+    ).
 
 %%% ===================================================================
 %%% Offset consistency: no gaps, monotonically increasing
@@ -89,8 +112,10 @@ tc_offsets_monotonic_test() ->
     Offsets = [Off || {_, Off, _} <- ebpf_ctx:fields(tc)],
     pairs_ascending(Offsets).
 
-pairs_ascending([]) -> ok;
-pairs_ascending([_]) -> ok;
+pairs_ascending([]) ->
+    ok;
+pairs_ascending([_]) ->
+    ok;
 pairs_ascending([A, B | Rest]) ->
     ?assert(A < B),
     pairs_ascending([B | Rest]).
@@ -135,14 +160,17 @@ data_offset_differs_xdp_vs_tc_test() ->
 
 xdp_matches_kernel_uapi_test() ->
     Expected = [
-        {<<"data">>,            0},
-        {<<"data_end">>,        4},
-        {<<"data_meta">>,       8},
+        {<<"data">>, 0},
+        {<<"data_end">>, 4},
+        {<<"data_meta">>, 8},
         {<<"ingress_ifindex">>, 12},
-        {<<"rx_queue_index">>,  16},
-        {<<"egress_ifindex">>,  20}
+        {<<"rx_queue_index">>, 16},
+        {<<"egress_ifindex">>, 20}
     ],
-    lists:foreach(fun({Name, ExpOff}) ->
-        {ok, Off, 4} = ebpf_ctx:field(xdp, Name),
-        ?assertEqual(ExpOff, Off)
-    end, Expected).
+    lists:foreach(
+        fun({Name, ExpOff}) ->
+            {ok, Off, 4} = ebpf_ctx:field(xdp, Name),
+            ?assertEqual(ExpOff, Off)
+        end,
+        Expected
+    ).

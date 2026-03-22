@@ -1,23 +1,40 @@
-%% @doc Linear-scan register allocator for BPF IR.
 %%
-%% Computes a mapping from virtual registers to physical BPF registers.
-%% When more vregs are simultaneously live than available physical registers,
-%% excess vregs are spilled to the BPF stack via R10 (frame pointer).
-%% Returns {Assignment, SpillMap} where SpillMap maps vregs to stack offsets.
+%% Copyright 2026 Erlkoenig Contributors
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+
 -module(ebpf_regalloc).
+-moduledoc """
+Linear-scan register allocator for BPF IR.
+
+Computes a mapping from virtual registers to physical BPF registers.
+When more vregs are simultaneously live than available physical registers,
+excess vregs are spilled to the BPF stack via R10 (frame pointer).
+Returns {Assignment, SpillMap} where SpillMap maps vregs to stack offsets.
+""".
 
 -include("ebpf_ir.hrl").
 
 -export([allocate/1]).
 
 -record(interval, {
-    vreg  :: vreg(),
+    vreg :: vreg(),
     start :: non_neg_integer(),
-    stop  :: non_neg_integer()
+    stop :: non_neg_integer()
 }).
 
-%% @doc Compute register assignment for all virtual registers.
-%% Returns {Assignment :: #{vreg() => preg()}, SpillMap :: #{vreg() => integer()}}.
+-doc "Compute register assignment for all virtual registers. Returns {Assignment :: #{vreg() => preg()}, SpillMap :: #{vreg() => integer()}}.".
 -spec allocate(#ir_program{}) -> {#{vreg() => preg()}, #{vreg() => integer()}}.
 allocate(#ir_program{entry = Entry, blocks = Blocks}) ->
     Order = linearize(Entry, Blocks),
@@ -37,8 +54,10 @@ allocate(#ir_program{entry = Entry, blocks = Blocks}) ->
     MaxStackDepth = find_max_stack_depth(Order, Blocks),
     InitSlot = (MaxStackDepth + 7) div 8,
     %% First try: 8 regs (R1-R5, R7-R9)
-    Sorted = lists:sort(fun(#interval{start = A}, #interval{start = B}) -> A =< B end,
-                        Intervals),
+    Sorted = lists:sort(
+        fun(#interval{start = A}, #interval{start = B}) -> A =< B end,
+        Intervals
+    ),
     {Assign1, Spills1} = linear_scan(Sorted, PreColors, [7, 8, 9, 1, 2, 3, 4, 5], InitSlot),
     case maps:size(Spills1) of
         0 ->
@@ -59,13 +78,18 @@ linearize_bfs([], _Visited, _Blocks, Acc) ->
     lists:reverse(Acc);
 linearize_bfs([Label | Rest], Visited, Blocks, Acc) ->
     case maps:is_key(Label, Visited) of
-        true -> linearize_bfs(Rest, Visited, Blocks, Acc);
+        true ->
+            linearize_bfs(Rest, Visited, Blocks, Acc);
         false ->
             case maps:find(Label, Blocks) of
                 {ok, Block} ->
                     Succs = term_succs(Block#ir_block.term),
-                    linearize_bfs(Rest ++ Succs, Visited#{Label => true},
-                                  Blocks, [Label | Acc]);
+                    linearize_bfs(
+                        Rest ++ Succs,
+                        Visited#{Label => true},
+                        Blocks,
+                        [Label | Acc]
+                    );
                 error ->
                     linearize_bfs(Rest, Visited#{Label => true}, Blocks, Acc)
             end
@@ -81,31 +105,49 @@ term_succs(unreachable) -> [].
 %%% ===================================================================
 
 build_insn_map(Order, Blocks) ->
-    lists:foldl(fun(Label, {Map, Idx}) ->
-        Block = maps:get(Label, Blocks),
-        Len = length(Block#ir_block.instrs) + 1,
-        {Map#{Label => {Idx, Idx + Len - 1}}, Idx + Len}
-    end, {#{}, 0}, Order).
+    lists:foldl(
+        fun(Label, {Map, Idx}) ->
+            Block = maps:get(Label, Blocks),
+            Len = length(Block#ir_block.instrs) + 1,
+            {Map#{Label => {Idx, Idx + Len - 1}}, Idx + Len}
+        end,
+        {#{}, 0},
+        Order
+    ).
 
 %%% ===================================================================
 %%% Compute live intervals
 %%% ===================================================================
 
 compute_intervals(InsnMap, Order, Blocks) ->
-    Ranges = lists:foldl(fun(Label, Acc) ->
-        {StartIdx, _} = maps:get(Label, InsnMap),
-        Block = maps:get(Label, Blocks),
-        Acc2 = lists:foldl(fun({Offset, Instr}, A) ->
-            Idx = StartIdx + Offset,
-            A2 = update_range_if_vreg(Instr#ir_instr.dst, Idx, A),
-            lists:foldl(fun(Arg, A3) ->
-                update_range_if_vreg(Arg, Idx, A3)
-            end, A2, Instr#ir_instr.args)
-        end, Acc, lists:zip(lists:seq(0, length(Block#ir_block.instrs) - 1),
-                            Block#ir_block.instrs)),
-        TermIdx = StartIdx + length(Block#ir_block.instrs),
-        update_term_ranges(Block#ir_block.term, TermIdx, Acc2)
-    end, #{}, Order),
+    Ranges = lists:foldl(
+        fun(Label, Acc) ->
+            {StartIdx, _} = maps:get(Label, InsnMap),
+            Block = maps:get(Label, Blocks),
+            Acc2 = lists:foldl(
+                fun({Offset, Instr}, A) ->
+                    Idx = StartIdx + Offset,
+                    A2 = update_range_if_vreg(Instr#ir_instr.dst, Idx, A),
+                    lists:foldl(
+                        fun(Arg, A3) ->
+                            update_range_if_vreg(Arg, Idx, A3)
+                        end,
+                        A2,
+                        Instr#ir_instr.args
+                    )
+                end,
+                Acc,
+                lists:zip(
+                    lists:seq(0, length(Block#ir_block.instrs) - 1),
+                    Block#ir_block.instrs
+                )
+            ),
+            TermIdx = StartIdx + length(Block#ir_block.instrs),
+            update_term_ranges(Block#ir_block.term, TermIdx, Acc2)
+        end,
+        #{},
+        Order
+    ),
     [#interval{vreg = V, start = S, stop = E} || {V, {S, E}} <- maps:to_list(Ranges)].
 
 update_range(VReg, Idx, Map) ->
@@ -123,36 +165,57 @@ update_range_if_vreg(_, _, Map) -> Map.
 update_term_ranges({cond_br, {cmp, _, L, R}, _, _}, Idx, Map) ->
     Map2 = update_range_if_vreg(L, Idx, Map),
     update_range_if_vreg(R, Idx, Map2);
-update_term_ranges({cond_br, Reg, _, _}, Idx, Map) -> update_range_if_vreg(Reg, Idx, Map);
-update_term_ranges({exit, Reg}, Idx, Map) -> update_range_if_vreg(Reg, Idx, Map);
-update_term_ranges(_, _, Map) -> Map.
+update_term_ranges({cond_br, Reg, _, _}, Idx, Map) ->
+    update_range_if_vreg(Reg, Idx, Map);
+update_term_ranges({exit, Reg}, Idx, Map) ->
+    update_range_if_vreg(Reg, Idx, Map);
+update_term_ranges(_, _, Map) ->
+    Map.
 
 %%% ===================================================================
 %%% Extend intervals for loops
 %%% ===================================================================
 
 extend_for_loops(Intervals, Order, Blocks, InsnMap) ->
-    BackEdges = lists:foldl(fun(Label, Acc) ->
-        Block = maps:get(Label, Blocks),
-        {SrcStart, _} = maps:get(Label, InsnMap),
-        SrcEnd = SrcStart + length(Block#ir_block.instrs),
-        lists:foldl(fun(Target, A) ->
-            case maps:find(Target, InsnMap) of
-                {ok, {TgtStart, _}} when TgtStart =< SrcEnd -> [{TgtStart, SrcEnd} | A];
-                _ -> A
-            end
-        end, Acc, term_succs(Block#ir_block.term))
-    end, [], Order),
-    lists:map(fun(#interval{} = I) ->
-        lists:foldl(fun({LoopStart, LoopEnd}, Iv) ->
-            case Iv#interval.start =< LoopEnd andalso Iv#interval.stop >= LoopStart of
-                true ->
-                    Iv#interval{start = min(Iv#interval.start, LoopStart),
-                                stop = max(Iv#interval.stop, LoopEnd)};
-                false -> Iv
-            end
-        end, I, BackEdges)
-    end, Intervals).
+    BackEdges = lists:foldl(
+        fun(Label, Acc) ->
+            Block = maps:get(Label, Blocks),
+            {SrcStart, _} = maps:get(Label, InsnMap),
+            SrcEnd = SrcStart + length(Block#ir_block.instrs),
+            lists:foldl(
+                fun(Target, A) ->
+                    case maps:find(Target, InsnMap) of
+                        {ok, {TgtStart, _}} when TgtStart =< SrcEnd -> [{TgtStart, SrcEnd} | A];
+                        _ -> A
+                    end
+                end,
+                Acc,
+                term_succs(Block#ir_block.term)
+            )
+        end,
+        [],
+        Order
+    ),
+    lists:map(
+        fun(#interval{} = I) ->
+            lists:foldl(
+                fun({LoopStart, LoopEnd}, Iv) ->
+                    case Iv#interval.start =< LoopEnd andalso Iv#interval.stop >= LoopStart of
+                        true ->
+                            Iv#interval{
+                                start = min(Iv#interval.start, LoopStart),
+                                stop = max(Iv#interval.stop, LoopEnd)
+                            };
+                        false ->
+                            Iv
+                    end
+                end,
+                I,
+                BackEdges
+            )
+        end,
+        Intervals
+    ).
 
 %%% ===================================================================
 %%% Pre-coloring
@@ -161,9 +224,21 @@ extend_for_loops(Intervals, Order, Blocks, InsnMap) ->
 pre_color(Intervals) ->
     VRegs = [I#interval.vreg || I <- Intervals],
     PC0 = #{},
-    PC1 = case lists:member(v_ret, VRegs) of true -> PC0#{v_ret => 0}; false -> PC0 end,
-    PC2 = case lists:member(v_ctx, VRegs) of true -> PC1#{v_ctx => 6}; false -> PC1 end,
-    PC3 = case lists:member(v_fp, VRegs) of true -> PC2#{v_fp => 10}; false -> PC2 end,
+    PC1 =
+        case lists:member(v_ret, VRegs) of
+            true -> PC0#{v_ret => 0};
+            false -> PC0
+        end,
+    PC2 =
+        case lists:member(v_ctx, VRegs) of
+            true -> PC1#{v_ctx => 6};
+            false -> PC1
+        end,
+    PC3 =
+        case lists:member(v_fp, VRegs) of
+            true -> PC2#{v_fp => 10};
+            false -> PC2
+        end,
     {PC3, maps:values(PC3)}.
 
 %%% ===================================================================
@@ -175,10 +250,15 @@ linear_scan(SortedIntervals, PreColors, AvailRegs, InitSlot) ->
     %% clobber intervals (deferred activation), and normal intervals.
     {ToAlloc, PreAssign} = lists:partition(
         fun(#interval{vreg = V}) -> not maps:is_key(V, PreColors) end,
-        SortedIntervals),
+        SortedIntervals
+    ),
     {ClobberPre, FixedPre} = lists:partition(
-        fun(#interval{vreg = {clobber, _, _}}) -> true; (_) -> false end,
-        PreAssign),
+        fun
+            (#interval{vreg = {clobber, _, _}}) -> true;
+            (_) -> false
+        end,
+        PreAssign
+    ),
     InitAssignment = PreColors,
     FixedActive = [{I, maps:get(I#interval.vreg, PreColors)} || I <- FixedPre],
     %% Remove fixed pre-colored regs from available pool
@@ -187,43 +267,74 @@ linear_scan(SortedIntervals, PreColors, AvailRegs, InitSlot) ->
     %% Sort pending clobbers by start time for deferred activation
     PendingClobbers = lists:sort(
         fun(#interval{start = A}, #interval{start = B}) -> A =< B end,
-        ClobberPre),
+        ClobberPre
+    ),
     Pending = [{I, maps:get(I#interval.vreg, PreColors)} || I <- PendingClobbers],
     scan(ToAlloc, InitAssignment, FixedActive, FreeRegs, #{}, InitSlot, Pending).
 
 scan([], Assignment, _Active, _Free, Spills, _NextSlot, _Pending) ->
     {Assignment, Spills};
-scan([#interval{vreg = VReg} = I | Rest],
-     Assignment, Active, Free, Spills, NextSlot, Pending) ->
+scan(
+    [#interval{vreg = VReg} = I | Rest],
+    Assignment,
+    Active,
+    Free,
+    Spills,
+    NextSlot,
+    Pending
+) ->
     {Active2, Free2} = expire(Active, I#interval.start, Free),
     %% Activate pending clobbers whose start <= current point.
     %% This removes their registers from Free and evicts conflicting
     %% non-fixed intervals (spilling them to stack).
     {Active3, Free3, Pending2, Spills2, NextSlot2} =
-        activate_clobbers(Pending, I#interval.start, Active2, Free2,
-                          Assignment, Spills, NextSlot),
+        activate_clobbers(
+            Pending,
+            I#interval.start,
+            Active2,
+            Free2,
+            Assignment,
+            Spills,
+            NextSlot
+        ),
     case Free3 of
         [Reg | Free4] ->
-            scan(Rest, Assignment#{VReg => Reg}, [{I, Reg} | Active3],
-                 Free4, Spills2, NextSlot2, Pending2);
+            scan(
+                Rest,
+                Assignment#{VReg => Reg},
+                [{I, Reg} | Active3],
+                Free4,
+                Spills2,
+                NextSlot2,
+                Pending2
+            );
         [] ->
             %% No free registers — spill the longest-lived active interval
             case find_longest(Active3) of
                 {SpillI, SpillReg, Active4} when SpillI#interval.stop > I#interval.stop ->
                     %% Spill the longer-lived interval, give its register to current
                     SpillSlot = -(NextSlot2 + 1) * 8,
-                    scan(Rest,
-                         Assignment#{VReg => SpillReg},
-                         [{I, SpillReg} | Active4],
-                         [],
-                         Spills2#{SpillI#interval.vreg => SpillSlot},
-                         NextSlot2 + 1, Pending2);
+                    scan(
+                        Rest,
+                        Assignment#{VReg => SpillReg},
+                        [{I, SpillReg} | Active4],
+                        [],
+                        Spills2#{SpillI#interval.vreg => SpillSlot},
+                        NextSlot2 + 1,
+                        Pending2
+                    );
                 _ ->
                     %% Spill current interval (shortest remaining)
                     SpillSlot = -(NextSlot2 + 1) * 8,
-                    scan(Rest, Assignment, Active3, [],
-                         Spills2#{VReg => SpillSlot},
-                         NextSlot2 + 1, Pending2)
+                    scan(
+                        Rest,
+                        Assignment,
+                        Active3,
+                        [],
+                        Spills2#{VReg => SpillSlot},
+                        NextSlot2 + 1,
+                        Pending2
+                    )
             end
     end.
 
@@ -232,8 +343,15 @@ scan([#interval{vreg = VReg} = I | Rest],
 %% active interval holds that register, evict it to a spill slot.
 activate_clobbers([], _Point, Active, Free, _Assign, Spills, NextSlot) ->
     {Active, Free, [], Spills, NextSlot};
-activate_clobbers([{#interval{start = S} = CI, CReg} | Rest], Point,
-                  Active, Free, Assign, Spills, NextSlot) when S =< Point ->
+activate_clobbers(
+    [{#interval{start = S} = CI, CReg} | Rest],
+    Point,
+    Active,
+    Free,
+    Assign,
+    Spills,
+    NextSlot
+) when S =< Point ->
     Free2 = Free -- [CReg],
     %% Check if a non-fixed active interval currently holds CReg
     {Active2, Spills2, NextSlot2} =
@@ -245,10 +363,14 @@ activate_clobbers(Pending, _Point, Active, Free, _Assign, Spills, NextSlot) ->
 
 %% If a non-fixed active interval holds the given register, spill it.
 evict_from_reg(Active, Reg, Spills, NextSlot) ->
-    case lists:partition(
-           fun({#interval{vreg = V}, R}) ->
-               R =:= Reg andalso not is_fixed_vreg(V)
-           end, Active) of
+    case
+        lists:partition(
+            fun({#interval{vreg = V}, R}) ->
+                R =:= Reg andalso not is_fixed_vreg(V)
+            end,
+            Active
+        )
+    of
         {[], _} ->
             {Active, Spills, NextSlot};
         {[{EvictI, _} | _], Remaining} ->
@@ -258,31 +380,47 @@ evict_from_reg(Active, Reg, Spills, NextSlot) ->
 
 expire(Active, Point, Free) ->
     {Expired, Remaining} = lists:partition(
-        fun({#interval{stop = Stop}, _}) -> Stop < Point end, Active),
+        fun({#interval{stop = Stop}, _}) -> Stop < Point end, Active
+    ),
     %% Never return pre-colored registers (R0, R6, R10) to the free pool.
     %% They belong to fixed vregs (v_ret, v_ctx, v_fp) and must not be
     %% reassigned to normal virtual registers.
-    ReturnedRegs = [R || {#interval{vreg = V}, R} <- Expired,
-                         not is_fixed_vreg(V)],
+    ReturnedRegs = [
+        R
+     || {#interval{vreg = V}, R} <- Expired,
+        not is_fixed_vreg(V)
+    ],
     {Remaining, Free ++ ReturnedRegs}.
 
-find_longest([]) -> none;
+find_longest([]) ->
+    none;
 find_longest(Active) ->
     %% Find the non-pre-colored interval with the latest stop.
     %% Exclude pre-colored and clobber vregs — they must keep their register.
-    Candidates = [{I, R} || {I, R} <- Active,
-                            not is_fixed_vreg(I#interval.vreg)],
+    Candidates = [
+        {I, R}
+     || {I, R} <- Active,
+        not is_fixed_vreg(I#interval.vreg)
+    ],
     case Candidates of
-        [] -> none;
+        [] ->
+            none;
         _ ->
-            {MaxI, MaxR} = lists:foldl(fun({I, R}, {BI, BR}) ->
-                case I#interval.stop > BI#interval.stop of
-                    true -> {I, R};
-                    false -> {BI, BR}
-                end
-            end, hd(Candidates), tl(Candidates)),
-            Active2 = [{I, R} || {I, R} <- Active,
-                                 I#interval.vreg =/= MaxI#interval.vreg],
+            {MaxI, MaxR} = lists:foldl(
+                fun({I, R}, {BI, BR}) ->
+                    case I#interval.stop > BI#interval.stop of
+                        true -> {I, R};
+                        false -> {BI, BR}
+                    end
+                end,
+                hd(Candidates),
+                tl(Candidates)
+            ),
+            Active2 = [
+                {I, R}
+             || {I, R} <- Active,
+                I#interval.vreg =/= MaxI#interval.vreg
+            ],
             {MaxI, MaxR, Active2}
     end.
 
@@ -302,17 +440,25 @@ is_fixed_vreg(_) -> false.
 %%% ===================================================================
 
 find_call_helpers(InsnMap, Order, Blocks) ->
-    lists:foldl(fun(Label, Acc) ->
-        {StartIdx, _} = maps:get(Label, InsnMap),
-        Block = maps:get(Label, Blocks),
-        Instrs = Block#ir_block.instrs,
-        lists:foldl(fun({Offset, Instr}, A) ->
-            case Instr#ir_instr.op of
-                call_helper -> [StartIdx + Offset | A];
-                _ -> A
-            end
-        end, Acc, lists:zip(lists:seq(0, length(Instrs) - 1), Instrs))
-    end, [], Order).
+    lists:foldl(
+        fun(Label, Acc) ->
+            {StartIdx, _} = maps:get(Label, InsnMap),
+            Block = maps:get(Label, Blocks),
+            Instrs = Block#ir_block.instrs,
+            lists:foldl(
+                fun({Offset, Instr}, A) ->
+                    case Instr#ir_instr.op of
+                        call_helper -> [StartIdx + Offset | A];
+                        _ -> A
+                    end
+                end,
+                Acc,
+                lists:zip(lists:seq(0, length(Instrs) - 1), Instrs)
+            )
+        end,
+        [],
+        Order
+    ).
 
 %% Build clobber intervals as RANGES rather than single points.
 %% For consecutive calls at indices [10, 20, 30], each clobber interval
@@ -329,22 +475,31 @@ make_clobber_intervals(CallIdxs) ->
     Sorted = lists:sort(CallIdxs),
     make_clobber_ranges(Sorted, {[], #{}}).
 
-make_clobber_ranges([], Acc) -> Acc;
+make_clobber_ranges([], Acc) ->
+    Acc;
 make_clobber_ranges([Idx], {IvAcc, PCAcc}) ->
     %% Last (or only) call: point interval
-    lists:foldl(fun(R, {IA, PA}) ->
-        VReg = {clobber, Idx, R},
-        Iv = #interval{vreg = VReg, start = Idx, stop = Idx},
-        {[Iv | IA], PA#{VReg => R}}
-    end, {IvAcc, PCAcc}, [1, 2, 3, 4, 5]);
+    lists:foldl(
+        fun(R, {IA, PA}) ->
+            VReg = {clobber, Idx, R},
+            Iv = #interval{vreg = VReg, start = Idx, stop = Idx},
+            {[Iv | IA], PA#{VReg => R}}
+        end,
+        {IvAcc, PCAcc},
+        [1, 2, 3, 4, 5]
+    );
 make_clobber_ranges([Idx, Next | Rest], {IvAcc, PCAcc}) ->
     %% Range: block R1-R5 from this call until just before the next call
     Stop = Next - 1,
-    {IvAcc2, PCAcc2} = lists:foldl(fun(R, {IA, PA}) ->
-        VReg = {clobber, Idx, R},
-        Iv = #interval{vreg = VReg, start = Idx, stop = Stop},
-        {[Iv | IA], PA#{VReg => R}}
-    end, {IvAcc, PCAcc}, [1, 2, 3, 4, 5]),
+    {IvAcc2, PCAcc2} = lists:foldl(
+        fun(R, {IA, PA}) ->
+            VReg = {clobber, Idx, R},
+            Iv = #interval{vreg = VReg, start = Idx, stop = Stop},
+            {[Iv | IA], PA#{VReg => R}}
+        end,
+        {IvAcc, PCAcc},
+        [1, 2, 3, 4, 5]
+    ),
     make_clobber_ranges([Next | Rest], {IvAcc2, PCAcc2}).
 
 %%% ===================================================================
@@ -355,11 +510,24 @@ make_clobber_ranges([Idx, Next | Rest], {IvAcc, PCAcc}) ->
 %%% ===================================================================
 
 find_max_stack_depth(Order, Blocks) ->
-    lists:foldl(fun(Label, Depth) ->
-        Block = maps:get(Label, Blocks),
-        lists:foldl(fun(#ir_instr{args = Args}, D) ->
-            lists:foldl(fun({stack_off, Off}, D2) -> max(D2, -Off);
-                           (_, D2) -> D2
-                        end, D, Args)
-        end, Depth, Block#ir_block.instrs)
-    end, 0, Order).
+    lists:foldl(
+        fun(Label, Depth) ->
+            Block = maps:get(Label, Blocks),
+            lists:foldl(
+                fun(#ir_instr{args = Args}, D) ->
+                    lists:foldl(
+                        fun
+                            ({stack_off, Off}, D2) -> max(D2, -Off);
+                            (_, D2) -> D2
+                        end,
+                        D,
+                        Args
+                    )
+                end,
+                Depth,
+                Block#ir_block.instrs
+            )
+        end,
+        0,
+        Order
+    ).

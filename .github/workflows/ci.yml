@@ -9,14 +9,14 @@ on:
 jobs:
   erlang:
     name: Erlang Tests + Dialyzer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Beam
         uses: erlef/setup-beam@v1
         with:
-          otp-version: '27'
+          otp-version: '28'
           rebar3-version: '3.24'
 
       - name: Install build deps
@@ -28,9 +28,9 @@ jobs:
           path: |
             _build
             ~/.cache/rebar3
-          key: rebar3-otp27-${{ runner.os }}-${{ hashFiles('rebar.lock', 'rebar.config') }}
+          key: erlang-${{ hashFiles('rebar.lock', 'rebar.config') }}
           restore-keys: |
-            rebar3-otp27-${{ runner.os }}-
+            erlang-
 
       - name: Cache uBPF
         uses: actions/cache@v4
@@ -41,26 +41,21 @@ jobs:
       - name: Build uBPF
         run: ./scripts/build_ubpf.sh
 
-      - name: Compile
-        run: rebar3 compile
-
-      - name: EUnit
-        run: make test
-
-      - name: Dialyzer
-        run: rebar3 dialyzer
+      - name: CI gate
+        run: make check
 
   dsl:
     name: Elixir DSL Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Beam
         uses: erlef/setup-beam@v1
         with:
-          otp-version: '27'
+          otp-version: '28'
           elixir-version: '1.18'
+          rebar3-version: '3.24'
 
       - name: Compile Erlang (dependency)
         run: rebar3 compile

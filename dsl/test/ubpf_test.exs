@@ -226,17 +226,8 @@ defmodule ErlkoenigEbpfDsl.UbpfTest do
   # ── Test definitions ──
   # Each test: compile example → create maps → load → run_xdp → assert action
 
-  @tag :ubpf
   describe "uBPF execution of DSL examples" do
-    @describetag :ubpf
-
-    setup do
-      if port_available?() do
-        :ok
-      else
-        {:skip, "ubpf_port not available"}
-      end
-    end
+    @describetag skip: unless(File.exists?(Path.join(to_string(:code.priv_dir(:erlkoenig_ebpf)), "ubpf_port")), do: "ubpf_port not available")
 
     test "01_hello_pass returns XDP_PASS" do
       with_port(fn port ->
